@@ -1,0 +1,279 @@
+---
+title: "GSE121893_failed_human_adult_heart_analysis"
+author: "Cass Li"
+date: "20/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Step 1: Load the libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(topGO)
+library(org.Hs.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(dplyr)
+library(plotly)
+library(scran)
+```
+</div>
+
+The authors studied the cell compositon of two types of human heart disease (coronary atherosclerotic heart disease and dilated cardiomyopathy) by single-cell sequencing. Distinct subgroups of cardiac muscle, fibroblast cell and endothelial cell were detected. They generated a cell-cell interaction network using specific expressed ligands and receptors of cells. And we also observed the change of interaction and cell transformation with age.
+
+The data provided by the author includes three files:
+GSE121893_files.txt - list of fastq files uploaded to SRA
+GSE121893_human_heart_sc_info.txt - metadata
+human_heart_sc_umi.csv - umi
+
+It is very confusing that CM (cardiomyocate) and NCM (Non-cardiomyocyte) are categories in "Type" but not in "Cell Type".
+
+### Step 2 Load datasets for Human.
+
+<div class = "teal">
+```{r cache = TRUE}
+ori_meta <- read.table("~/Documents/Project_scRNA_seq_meta_analysis/GSE121893/GSE121893_human_heart_sc_info.txt", header = FALSE)
+names(ori_meta) <- as.matrix(ori_meta[1, ])
+ori_meta <- ori_meta[-1, ]
+head(ori_meta)
+# subset the data for endothelial cells - EC
+ori_meta_EC <- ori_meta %>% filter (CellType == "EC")
+# Need to pay attention here that the "Type" of the prep where EC were extracted can be "CM". It means a CM enriched prep not a CM exclusive prep. The "ID" column can be used to extract umi for EC specifically.
+ori_umi <- read.csv("~/Documents/Project_scRNA_seq_meta_analysis/GSE121893/human_heart_sc_umi.csv")
+# Subset the umi dataset using the ID in ori_meta_EC
+# dplyr might give you a little hiccup here just becasue the select space will be masked by the biomart. Just reinstall the package and you will be fine.
+ori_umi_EC <- ori_umi %>% select(X, as.character(ori_meta_EC$ID))
+# The first column of the matrix is the gene names. Need to change it to the rownames.
+rownames(ori_umi_EC) <- as.character(ori_umi_EC$X)
+ori_umi_EC <- ori_umi_EC[, -1]
+# Now the data is tidy and can be used for downstream analysis.
+Human <- CreateSeuratObject(ori_umi_EC, project = "HumanHeartProject", min.cells = 3, min.features = 200)
+Human[["percent.mt"]] <- PercentageFeatureSet(Human, pattern = "^MT-")
+# fix the metadata
+Human@meta.data$age <- "Adult"
+Human@meta.data$species <- "Human"
+Human@meta.data$condition <- "Heart failure"
+Human@meta.data$group <- paste0(Human@meta.data$condition, " ", Human@meta.data$species)
+# Need to clarify this later once decide which cells are from the HF (heart failure) and which ones from the N (normal heart).
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/HF_HumanQC.png", width = 600, height = 400)
+VlnPlot(Human, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+
+# colors = c("#383745","#A17724", "#9E9CC2")
+qc <- Human@meta.data
+# nCount
+plot_ly(qc, y = ~ nCount_RNA, x = ~ group, type = "box", width = 200, height = 400, colors = c("#A17724")) %>% layout(showlegend = F, xaxis = list(tickfont = list(size = 15), ticktext = list(" "), titlefont = list(size = 15)), yaxis = list(title = "nCount_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+# nFeature
+plot_ly(qc, y = ~ nFeature_RNA, x = ~ group, type = "box", width = 200, height = 400, colors = c("#A17724")) %>% layout(showlegend = F, xaxis = list(tickfont = list(size = 15), ticktext = list(" "), titlefont = list(size = 15)), yaxis = list(title = "nFeature_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+# percent.mt
+plot_ly(qc, y = ~ percent.mt, x = ~ group, type = "box", width = 200, height = 400, colors = c("#A17724")) %>% layout(showlegend = F, xaxis = list(tickfont = list(size = 15), ticktext = list(" "), titlefont = list(size = 15)), yaxis = list(title = "percent.mt", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+#### Remove mitochondrial genes now ####
+########################################
+library(readxl)
+mito.reference <- read_excel("~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/Healthy_mouse_P6_P10_Adult_analysis_run1/mito carta 2.0 reference lists/Human.MitoCarta2.0.xls", sheet = 2) # 1158 genes in total
+# filter the reference gene list based on the subcellular localisation provided by the last column " HPA_PrimarySubcellularLocalization_2015".
+mito.touse1 <- dplyr::filter (mito.reference, grepl("Mitochondria", HPA_PrimarySubcellularLocalization_2015))$Symbol # 354 genes in total
+## mitochondrial genes from each object
+mito.touse2 <- grep(pattern = "^MT-", x = rownames(Human@assays$RNA@counts), value = TRUE)
+## combine the lists
+mito.touse <- unique(c(mito.touse1, mito.touse2))
+# define %!in% function
+`%!in%` = Negate(`%in%`)
+########################################
+
+# take the final mito geneset out and reconstruct the dataset
+counts <- Human@assays$RNA@counts
+new.counts <- counts[rownames(counts) %!in% mito.touse, ]
+new.Human <- CreateSeuratObject(counts = new.counts)
+new.Human@meta.data <- new.Human@meta.data[, 2:3]
+new.Human@meta.data <- new.Human@meta.data %>% mutate (accessionNo = "GSE121893", species = "Human", age = "Adult", condition = "Heart failure") %>% mutate (group = paste0(condition, " ", species))
+rownames(new.Human@meta.data) <- colnames(new.Human@assays$RNA@counts)
+new.Human[["percent.mt"]] <- PercentageFeatureSet(new.Human, pattern = "^MT-")
+VlnPlot(new.Human, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2) # now the mitochondrial genes are gone so proceed to the next step of filtering
+
+# Filtering of each dataset is based on the same cut off
+new.Human <- subset(new.Human, subset = nFeature_RNA > 200 & nFeature_RNA < 8000) # no mitochondrial genes detected, weird. Yes, it happen again.
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- cc.genes$s.genes # return a dataframe
+g2m.genes <- cc.genes$g2m.genes # return a dataframe
+new.Human <- NormalizeData(new.Human) # normalise before cell cycle score
+new.Human <- CellCycleScoring(new.Human, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE) # MLF1IP is not in the dataset
+# Use scTransform to normalise datasets
+new.Human <- SCTransform(new.Human, vars.to.regress = c("S.Score", "G2M.Score")) # default assay is now set to SCT
+```
+</div>
+
+### Step 3 Proceed with downstream analysis on the SCTransformed dataset
+
+<div class = "teal">
+```{r downstream_analysis, message = FALSE, warning = FALSE}
+# the default assay is SCT
+new.Human <- RunPCA(new.Human, verbose = FALSE)
+set.seed(1024)
+new.Human <- RunUMAP(new.Human, dims = 1:30)
+saveRDS(new.Human, file = "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/HF_Human_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(new.Human, combine = FALSE, pt.size = 1)
+dev.off()
+```
+</div>
+
+### Step 4 FindNeighbors and FindClusters (on default assay which is "SCT")
+
+<div class = "teal">
+```{r clustering, message = FALSE, warning = FALSE}
+new.Human <- FindNeighbors(new.Human, dims = 1:30)
+
+for (i in 1:20) {
+        new.Human <- FindClusters(new.Human, resolution = 0.1*i)
+}
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(new.Human) # cluster tree visualisation
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(new.Human, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 1.2 is a good choice and change the clusters to the res 1.2 one
+new.Human@meta.data$seurat_clusters <- new.Human@meta.data$SCT_snn_res.1.2
+new.Human <- FindClusters(new.Human, resolution = 1.2) # run it again
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_clustering_Human.png", res = 300, width = 2500, height = 2500)
+DimPlot(new.Human, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(new.Human, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find cluster markers using the clustering information in this assay
+Human_markers <- FindAllMarkers(new.Human, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Human_markers_top10 <- Human_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(Human_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(new.Human@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(new.Human, idents = as.character(i))
+        expr <- cluster@assays$SCT@scale.data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                      geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+                      coord_flip() +
+                      ggtitle(paste0("Human Cluster ", i)) +
+                      ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                      theme_classic() + 
+                      theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+```
+</div>
+
+### Step 5 Change default assay to "SCT"; normalize then generate FeaturePlots 
+
+The reason of changing back to RNA assay is because the integrated assay only has 3000 genes and values from SCT assay represent the SCT normalized values for each dataset, prior to integration.
+
+<div class = "teal">
+```{r feature_plot, warning = FALSE, message = FALSE}
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_PECAM1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(new.Human, features = c("PECAM1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(new.Human, features = c("PECAM1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+```
+</div>
+
+### Step 6 Extract Endothelial cells using AUCell
+
+<div class = "teal">
+```{r feature_plot, warning = FALSE, message = FALSE}
+saveRDS(new.Human, "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_object.rds") # save object
+
+# Load count data
+exprMatrix <- new.Human@assays$RNA@counts
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+
+# Set gene set
+ECgenes <- mouse2human(c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4"))$humanGene
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+
+# Build gene expression rankings for each cell
+cells_rankings <- AUCell_buildRankings(exprMatrix, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_EC_rankings.RData")
+
+# Calculate enrichment for the gene signatures (AUC)
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) # add AUC score to the Human object
+new.Human@meta.data$AUC_score <- t(getAUC(cells_AUC))
+save(cells_AUC, file = "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_EC_AUC.RData")
+
+saveRDS(new.Human, "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_object.rds") # save object 
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE) 
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned)
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_SCTassay_AUCell_threshold.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(new.Human, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_SCTassay_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(new.Human, cells.highlight = WhichCells(object = new.Human, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(new.Human, cells.highlight = WhichCells(object = new.Human, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data
+Human_EC <- subset(new.Human, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])))
+saveRDS(Human_EC, "~/Documents/Project_scRNA_seq_meta_analysis/Healthy_HeartFailure_Human_comparison/GSE121893_HF_Human_EC.rds")
+```
+</div>
