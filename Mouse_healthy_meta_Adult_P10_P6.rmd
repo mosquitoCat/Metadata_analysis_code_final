@@ -1,0 +1,1041 @@
+---
+title: "Meta analyses of multiple EC datasets from P6, P10 and healthy mouse"
+author: "Cass Li"
+date: "04/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In order to find the similarity and differences between mouse and human ECs at distinct stages of development and under different conditions (healthy vs MI), I pulled 5 GEO and 1 ArrayExpress libraries with 11 datasets in total to perform a meta analysis.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(monocle)
+library(Biobase)
+library(scrat)
+library(plotly)
+library(scran)
+library(GENIE3)
+library(RcisTarget)
+# library(monocle3)
+```
+</div>
+
+### Step 1: Look at all ***healthy*** datasets first. Load the EC enriched objects.
+
+<div class = "teal">
+```{r load objects}
+# GSE136088 has one Sham_EC; GSE132880 has Healthy_EC; GSE118545 has a P6_EC and a P10_EC; GSE106118 has a Human_EC; E-MTAB-7376 has a Sham_EC
+ob1 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/GSE132880_Healthy_EC.rds")
+ob2 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/GSE118545_P6_EC.rds")
+ob3 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/GSE118545_P6_EC.rds")
+```
+</div>
+
+### Step 2: Prepare a list of mitochondrial genes to be removed
+
+I remove the mitochondrial genes at the beginning is because remove it later will interfere the normalisation step and downstream analysis.
+
+<div class = "teal">
+```{r remove_mitochondrial_genes}
+# Remove mitochrondrial genes from the dataset using the mt- names and mito carta 2.0 as reference. 
+library(readxl)
+mito.reference <- read_excel("~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/Healthy_mouse_P6_P10_Adult_analysis_run1/mito carta 2.0 reference lists/Mouse.MitoCarta2.0.xls", sheet = 2) # 1158 genes in total
+# filter the reference gene list based on the subcellular localisation provided by the last column " HPA_PrimarySubcellularLocalization_2015".
+mito.touse1 <- dplyr::filter (mito.reference, grepl("Mitochondria", HPA_PrimarySubcellularLocalization_2015))$Symbol # 354 genes in total
+## mitochondrial genes from each object
+mito.touse2 <- grep(pattern = "^mt-", x = rownames(ob1@assays$RNA@counts), value = TRUE)
+mito.touse3 <- grep(pattern = "^mt-", x = rownames(ob2@assays$RNA@counts), value = TRUE)
+mito.touse4 <- grep(pattern = "^mt-", x = rownames(ob3@assays$RNA@counts), value = TRUE)
+## combine the lists
+mito.touse <- unique(c(mito.touse1, mito.touse2, mito.touse3, mito.touse4))
+# define %!in% function
+`%!in%` = Negate(`%in%`)
+```
+</div>
+
+
+### Step 3: Extract raw counts from each object to create a new object and add necessary new metadata.
+<div class = "teal">
+
+```{r map create new objects and add metadata}
+counts.ob1 <- ob1@assays$RNA@counts
+new.counts.ob1 <- counts.ob1[rownames(counts.ob1) %!in% mito.touse, ]
+new.ob1 <- CreateSeuratObject(counts = new.counts.ob1)
+new.ob1@meta.data <- new.ob1@meta.data[, 2:3]
+new.ob1@meta.data <- new.ob1@meta.data %>% mutate (AccessionNo = "GSE132880", Species = "mouse", Age = "Adult", Treatment = "Healthy", Group = "Healthy")
+rownames(new.ob1@meta.data) <- colnames(new.ob1@assays$RNA@counts)
+
+counts.ob2 <- ob2@assays$RNA@counts
+new.counts.ob2 <- counts.ob2[rownames(counts.ob2) %!in% mito.touse, ]
+new.ob2 <- CreateSeuratObject(counts = new.counts.ob2)
+new.ob2@meta.data <- new.ob2@meta.data[, 2:3]
+new.ob2@meta.data <- new.ob2@meta.data %>% mutate (AccessionNo = "GSE118545", Species = "mouse", Age = "P6", Treatment = "Healthy", Group = "Healthy")
+rownames(new.ob2@meta.data) <- colnames(new.ob2@assays$RNA@counts)
+
+counts.ob3 <- ob3@assays$RNA@counts
+new.counts.ob3 <- counts.ob3[rownames(counts.ob3) %!in% mito.touse, ]
+new.ob3 <- CreateSeuratObject(counts = new.counts.ob3)
+new.ob3@meta.data <- new.ob3@meta.data[, 2:3]
+new.ob3@meta.data <- new.ob3@meta.data %>% mutate (AccessionNo = "GSE118545", Species = "mouse", Age = "P10", Treatment = "Healthy", Group = "Healthy")
+rownames(new.ob3@meta.data) <- colnames(new.ob3@assays$RNA@counts)
+```
+</div>
+
+### Step 3: SCTransform and integrate the data
+
+<div class = "teal">
+```{r integrate objects, warning = FALSE}
+# change accessible memory
+options(future.globals.maxSize = 10000 * 1024^2)
+# create object list
+healthy_list <- c(new.ob1, new.ob2, new.ob3)
+# Integration and Label Transfer standard workflow
+for (i in 1:length(healthy_list)) {
+    healthy_list[[i]] <- SCTransform(healthy_list[[i]], verbose = FALSE)
+}
+# Integrate data - it takes awefully long time to finish.
+healthy_features <- SelectIntegrationFeatures(object.list = healthy_list, nfeatures = 4000) # 4378
+healthy_list <- PrepSCTIntegration(object.list = healthy_list, anchor.features = healthy_features, 
+    verbose = T)
+healthy_anchors <- FindIntegrationAnchors(object.list = healthy_list, normalization.method = "SCT", 
+    anchor.features = healthy_features, verbose = FALSE) # if the metadata names is not updated then this line is likely to go wrong.
+healthy_integrated <- IntegrateData(anchorset = healthy_anchors, normalization.method = "SCT", verbose = FALSE)
+```
+</div>
+
+### Step 4: Downstream analysis
+
+<div class = "teal">
+```{r downstream analysis, message = FALSE, warning = FALSE}
+healthy_integrated <- RunPCA(healthy_integrated, verbose = FALSE)
+set.seed(1024)
+healthy_integrated <- RunUMAP(healthy_integrated, dims = 1:50)
+saveRDS(healthy_integrated, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_Integrated_UMAP_by_AccessionNo.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, group.by = "AccessionNo", pt.size = 1.5)
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_Integrated_UMAP_by_AccessionNo_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, group.by = "AccessionNo", pt.size = 1.5, cols = c("#2A385B", "#9C9EB5")) + NoLegend()
+p <- DimPlot(healthy_integrated, group.by = "AccessionNo", pt.size = 0.4, cols = c("#2A385B", "#9C9EB5")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_Integrated_UMAP_by_age.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, group.by = "Age", pt.size = 1.5, cols = c("#601A4A", "#EE442F", "#63ACBE"))
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_Integrated_UMAP_by_age_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, group.by = "Age", pt.size = 1.5, cols = c("#601A4A", "#EE442F", "#63ACBE")) + NoLegend()
+p <- DimPlot(healthy_integrated, group.by = "Age", pt.size = 0.4, cols = c("#601A4A", "#EE442F", "#63ACBE")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+```
+</div>
+
+### Step 5: FindNeighbours and FindClusters
+
+<div class = "teal">
+    ```{r clustering_and_GO, message = FALSE, warning = FALSE}
+healthy_integrated <- FindNeighbors(healthy_integrated, dims = 1:50)
+# to determine the resolution of the clustering process
+for (i in 1:20) {
+    healthy_integrated <- FindClusters(healthy_integrated, resolution = 0.1*i)
+}
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_healthy_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(healthy_integrated) # cluster tree visualisation
+dev.off()
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_healthy_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(healthy_integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.6 is a good choice and change the clusters to the res 0.6 one
+healthy_integrated@meta.data$seurat_clusters <- healthy_integrated@meta.data$integrated_snn_res.0.6
+healthy_integrated <- FindClusters(healthy_integrated, resolution = 0.6) 
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_clustering_healthy_integrated.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(healthy_integrated, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# graph for subsection with bigger dot size
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_clustering_healthy_integrated_bigger_dots.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated, label = TRUE, label.size = 10, pt.size = 1.5) + NoLegend()
+dev.off()
+
+# Find cluster markers using the clustering information in this assay using roc method
+healthy_integrated_markers <- FindAllMarkers(healthy_integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, test.use = "roc")
+healthy_integrated_markers_top10 <- healthy_integrated_markers %>% group_by(cluster) %>% top_n(n = 10, wt = myAUC) # I like the AUC method better
+# ATTENTION: not all markers have a P < 0.05. Choose carefully.
+write.csv(healthy_integrated_markers, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_cluster_markers.csv")
+write.csv(healthy_integrated_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers 
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## remember the test is based on integrated data rather than the raw counts, thus a lot of parameters need to be reset. I first tried to set the threshold to median of expression levels across different cells, it didn't yield any results. Then I tried to set the threshold to lower quantile using type 7 in r and this didn't yield any results either as the threshold is too high. Then I tried to set the threshold to 10%, still doesn't yield any results. I thing uisng the raw counts might be the best way. 
+length <- length(unique(healthy_integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(healthy_integrated, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > background expression level in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)] # ncol(expr) is total cell number
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Healthy Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+} 
+```
+
+### Step 6: Further filtering
+
+<div class = "teal">
+```{r remove_unwanted_cells, message = FALSE, warning = FALSE}
+# 18 clusters were found initially
+# cluster 17 is leukocytes
+# cluster 16 is erythrocytes
+healthy_integrated_removed <- subset(healthy_integrated, idents = c("16", "17"), invert = TRUE)
+# re-clustering
+healthy_integrated_removed <- RunPCA(healthy_integrated_removed, verbose = FALSE)
+set.seed(1024)
+healthy_integrated_removed <- RunUMAP(healthy_integrated_removed, dims = 1:50)
+saveRDS(healthy_integrated_removed, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed.rds")
+
+# plots
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_UMAP_by_AccessionNo.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated_removed, group.by = "AccessionNo", pt.size = 1.5, cols = c("#2A385B", "#9C9EB5"))
+p <- DimPlot(healthy_integrated_removed, group.by = "AccessionNo", pt.size = 0.4, cols = c("#2A385B", "#9C9EB5")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_UMAP_by_AccessionNo_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated_removed, group.by = "AccessionNo", pt.size = 1.5, cols = c("#2A385B", "#9C9EB5")) + NoLegend()
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_UMAP_by_age.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated_removed, group.by = "Age", pt.size = 1.5, cols = c("#601A4A", "#EE442F", "#63ACBE"))
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_UMAP_by_age_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(healthy_integrated_removed, group.by = "Age", pt.size = 1.5, cols = c("#601A4A", "#EE442F", "#63ACBE")) + NoLegend()
+p <- DimPlot(healthy_integrated_removed, group.by = "Age", pt.size = 0.4, cols = c("#601A4A", "#EE442F", "#63ACBE")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find neigbours again
+new_healthy_integrated_removed <- FindNeighbors(healthy_integrated_removed, dims = 1:30)
+# to determine the resolution of the clustering process
+
+for (i in 1:20) {
+    new_healthy_integrated_removed <- FindClusters(new_healthy_integrated_removed, resolution = 0.1*i)
+}
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(new_healthy_integrated_removed) # cluster tree visualisation
+dev.off()
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(new_healthy_integrated_removed, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.5 is a good choice and change the clusters to the res 0.5 one
+new_healthy_integrated_removed@meta.data$seurat_clusters <- new_healthy_integrated_removed@meta.data$integrated_snn_res.0.5
+new_healthy_integrated_removed <- FindClusters(new_healthy_integrated_removed, resolution = 0.5) # run it again
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_clustering_integrated_removed.png", res = 300, width = 1800, height = 1800)
+DimPlot(new_healthy_integrated_removed, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(new_healthy_integrated_removed, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# graph for subsection with bigger dot size
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_clustering_integrated_removed_bigger_dots.png", res = 300, width = 1800, height = 1800)
+DimPlot(new_healthy_integrated_removed, label = TRUE, label.size = 10, pt.size = 1.5) + NoLegend()
+dev.off()
+
+# graph for subsection with bigger dot size
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_clustering_integrated_removed_bigger_dots_with_legend.png", res = 300, width = 1800, height = 1800)
+DimPlot(new_healthy_integrated_removed, label = TRUE, label.size = 10, pt.size = 1.5)
+dev.off()
+
+# Find cluster markers using the clustering information in this assay and also the top makers will be used to generate violin plot for each cluster
+new_healthy_integrated_removed_markers <- FindAllMarkers(new_healthy_integrated_removed, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.csv(new_healthy_integrated_removed_markers, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_markers.csv")
+
+new_healthy_integrated_removed_markers_top10 <- new_healthy_integrated_removed_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(new_healthy_integrated_removed_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_marker_top10.csv")
+
+new_healthy_integrated_removed_markers_top30 <- new_healthy_integrated_removed_markers %>% group_by(cluster) %>% top_n(n = 30, wt = avg_logFC)
+write.csv(new_healthy_integrated_removed_markers_top30, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_marker_top30.csv")
+
+new_healthy_integrated_removed_markers_top10_to_use <- new_healthy_integrated_removed_markers_top10 %>% filter (p_val_adj <= 1e-10)
+write.csv(new_healthy_integrated_removed_markers_top10_to_use, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_marker_top10_to_use.csv")
+
+# Also, a new round of GO analysis 
+length <- length(unique(new_healthy_integrated_removed@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(new_healthy_integrated_removed, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 3000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Mouse healthy cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+} 
+saveRDS(new_healthy_integrated_removed, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed.rds")
+```
+</div>
+
+### Step 7: Analyse the percentage of each cluster in each age group
+
+<div class = "teal">
+```{r cluster_constitution, message = FALSE, warning = FALSE}
+# select the feature to analyse
+meta_to_use <- new_healthy_integrated_removed@meta.data[, c("Age", "nFeature_SCT", "seurat_clusters")]
+# summarise the parametres
+summary <- meta_to_use %>% group_by(Age, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each Age group
+age_number <- as.data.frame(meta_to_use %>% group_by(Age) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(Age == "Adult" ~ n/age_number[1, 2]*100, Age == "P10" ~ n/age_number[2, 2]*100, Age == "P6" ~ n/age_number[3, 2]*100))
+
+# actual population graph
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_population_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_percentage_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = Age), position = position_dodge()) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = Age), position = position_dodge()) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off() 
+
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100, seurat_clusters == "10" ~ percentage/summary1[11, 2]*100, seurat_clusters == "11" ~ percentage/summary1[12, 2]*100, seurat_clusters == "12" ~ percentage/summary1[13, 2]*100, seurat_clusters == "13" ~ percentage/summary1[14, 2]*100))
+# unnormalised percentage graph
+# ggplot() + geom_bar(aes(y = percentage_norm, x = seurat_clusters, fill = Age), data = summary, stat="identity")
+# order the data using Adult data
+Adult_data <- summary %>% filter (Age == "Adult")
+Adult_table <- Adult_data[, c(2, 5)]
+cluster_levels <- Adult_table[order(Adult_table$percentage_norm), ]$seurat_clusters
+summary$seurat_clusters <- factor(summary$seurat_clusters,levels = cluster_levels)
+# normalised percentage graph
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_cluster_normalised_percentage_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+# Calculate the dominant group
+summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 40 ~ "Y", percentage_norm < 40 ~ "N"))
+write.csv(summary, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/summary_percentage_dominant.csv")
+
+# neonates (P6 and P10) have more cells in cluster 5, 8, 10, 11, 12, 13
+# Top10 markers to use
+# cluster 5 all markers
+cluster5.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "5", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster5.features, pt.size = 0)
+
+# cluster 5 specific
+cluster5.features.specific <- c("Vwf", "Ctsh")
+# produce single plots so I can manipulate the layout
+for (i in cluster5.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Vwf", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 8 all markers
+cluster8.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "8", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster8.features, pt.size = 0)
+
+# cluster 8 specific
+cluster8.features.specific <- c("Prc1")
+# produce single plots so I can manipulate the layout
+for (i in cluster8.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Prc1", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 10 all markers
+cluster10.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "10", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster10.features, pt.size = 0)
+
+# cluster 10 specific
+cluster10.features.specific <- c("Rgs4")
+# produce single plots so I can manipulate the layout
+for (i in cluster10.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Rgs4", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 11 all markers
+cluster11.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "11", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster11.features, pt.size = 0)
+
+# cluster 11 specific
+cluster11.features.specific <- c("Cep83os")
+# produce single plots so I can manipulate the layout
+for (i in cluster11.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Cep83os", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 12 all markers
+cluster12.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "12", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster12.features, pt.size = 0)
+
+# cluster 12 specific
+cluster12.features.specific <- c("Ccdc80")
+# produce single plots so I can manipulate the layout
+for (i in cluster12.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Ccdc80", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 13 all markers
+cluster13.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "13", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster13.features, pt.size = 0)
+
+# cluster 13 specific
+cluster13.features.specific <- c("Myl2")
+# produce single plots so I can manipulate the layout
+for (i in cluster13.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Myl2", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# adults have more cells in cluster 1, 2, 4, 6, 7
+# Top10 markers to use
+
+# cluster 1 all markers
+cluster1.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "1", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster1.features, pt.size = 0)
+
+# cluster 1 specific
+cluster1.features.specific <- c("Igfbp7")
+# produce single plots so I can manipulate the layout
+for (i in cluster1.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Igfbp7", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 2 all markers
+cluster2.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "2", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster2.features, pt.size = 0)
+
+# cluster 2 specific
+cluster2.features.specific <- c("Hsp90aa1")
+# produce single plots so I can manipulate the layout
+for (i in cluster2.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Hsp90aa1", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 4 all markers
+cluster4.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "4", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster4.features, pt.size = 0)
+
+# cluster 4 specific
+cluster4.features.specific <- c("Alpl")
+# produce single plots so I can manipulate the layout
+for (i in cluster4.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Alpl", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 6 all markers
+cluster6.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "6", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster6.features, pt.size = 0)
+
+# cluster 6 specific
+cluster6.features.specific <- c("Ifit1")
+# produce single plots so I can manipulate the layout
+for (i in cluster6.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Ifit1", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# cluster 7 all markers
+cluster7.features <- new_healthy_integrated_removed_markers_top10_to_use[new_healthy_integrated_removed_markers_top10_to_use$cluster == "7", ]$gene
+VlnPlot(new_healthy_integrated_removed, features = cluster7.features, pt.size = 0)
+
+# cluster 7 specific
+cluster7.features.specific <- c("Actb")
+# produce single plots so I can manipulate the layout
+for (i in cluster7.features.specific) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(new_healthy_integrated_removed, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))  
+    dev.off()
+}
+
+p <- VlnPlot(new_healthy_integrated_removed, features = "Actb", pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none")
+ggplotly(p, width = 500, height = 200)
+
+# Dotplot for all top markers
+toplot <- c("Vwf", "Prc1", "Rgs4", "Cep83os", "Ccdc80", "Myl2", "Igfbp7", "Hsp90aa1", "Alpl", "Ifit1", "Actb")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/Healthy_mouse_P6_P10_Adult_integrated_removed_feature_plot_all.png", res = 300, width = 2000, height = 2000)
+DotPlot(new_healthy_integrated_removed, features = toplot, cols = viridis::inferno(3, alpha = 1)) + RotatedAxis() + xlab ("Top marker") + ylab("Cluster")
+p <- DotPlot(new_healthy_integrated_removed, features = toplot, cols = viridis::inferno(3, alpha = 1)) + RotatedAxis() + xlab ("Top marker") + ylab("Cluster")
+ggplotly(p, width = 650, height = 500)
+p_nolegend <- DotPlot(new_healthy_integrated_removed, features = toplot, cols = viridis::inferno(3, alpha = 1)) + RotatedAxis() + xlab ("Top marker") + ylab("Cluster") + NoLegend()
+ggplotly(p_nolegend, width = 500, height = 500)
+dev.off()
+```
+</div>
+
+### Step 8: DE analysis
+
+What is the difference between Adult and P6/P10 proliferative cluster? ***This message from Satijalab is very important: This is why we treat sample comparison as a two-step process. First, we integrate datasets together to consistently identify common cell populations across datasets. Second, we perform DE on the original (unintegrated) data, to find gene expression differences for each population.***
+method 1: Seurat DE
+method 2: scDD
+method 3: scrat
+
+<div class = "teal">
+```{r seuratDE, message = FALSE, warning = FALSE}
+proliferative_cluster <- subset(new_healthy_integrated_removed, idents = "8")
+dim(proliferative_cluster)
+saveRDS(proliferative_cluster, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster.rds")
+
+# It is very important to rerun the whole pipeline for the subcluster as without the rest of the cells, the relationship between different cells needs recalculation and can't directly inherit whatever comes out of the previous analysis. 
+
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+proliferative_cluster <- CellCycleScoring(proliferative_cluster, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE)
+proliferative_cluster <- SCTransform(proliferative_cluster, vars.to.regress = c( "S.Score", "G2M.Score"))
+
+# reclustering proliferating cells
+proliferative_cluster <- RunPCA(proliferative_cluster, verbose = FALSE)
+set.seed(1024)
+proliferative_cluster <- RunUMAP(proliferative_cluster, dims = 1:30)
+saveRDS(proliferative_cluster, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster.rds")
+# find neighbours
+proliferative_cluster <- FindNeighbors(proliferative_cluster, dims = 1:30)
+for (i in 1:20) {
+        proliferative_cluster <- FindClusters(proliferative_cluster, resolution = 0.1*i)
+}
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(proliferative_cluster) # cluster tree visualisation
+dev.off()
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(proliferative_cluster, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 1.3 is a good choice
+proliferative_cluster@meta.data$seurat_clusters <- proliferative_cluster@meta.data$integrated_snn_res.1.3
+proliferative_cluster <- FindClusters(proliferative_cluster, resolution = 1.3) # run it again
+saveRDS(proliferative_cluster, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/clustering_proliferative_cluster.png", res = 300, width = 2500, height = 2500)
+DimPlot(proliferative_cluster, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(proliferative_cluster, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find cluster markers using the clustering information in this assay
+proliferative_cluster_markers <- FindAllMarkers(proliferative_cluster, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+proliferative_cluster_markers_top10 <- proliferative_cluster_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(proliferative_cluster_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_cluster_marker_top10.csv")
+
+proliferative_cluster_markers_top5 <- proliferative_cluster_markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+write.csv(proliferative_cluster_markers_top5, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_cluster_marker_top5.csv")
+
+proliferative_cluster_markers_top10_to_use <- proliferative_cluster_markers_top10 %>% filter (p_val_adj <= 1e-10)
+write.csv(proliferative_cluster_markers_top10_to_use, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_markers_top10_to_use.csv")
+
+# saved as loom file so can be processed with scanpy
+proliferative_loom <- as.loom(proliferative_cluster, filename = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_loom.loom", verbose = FALSE)
+proliferative_loom$close_all() # ALWAYS remember to close all
+
+# examine the vlnplots of top markers
+# "Sema6a", "Hspa8", "", "Gm11808", "Cox6a2", "Eln"
+features <- proliferative_cluster_markers_top10_to_use[proliferative_cluster_markers_top10_to_use$cluster == "0", ]$gene # change the cluster number for other clusters
+VlnPlot(proliferative_cluster, features = features, pt.size = 0)
+
+# calculate the normalised percentage
+# select the feature to analyse
+meta_to_use <- proliferative_cluster@meta.data[, c("Age", "nFeature_SCT", "seurat_clusters")]
+# summarise the parametres
+summary <- meta_to_use %>% group_by(Age, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# add rows where cell numbers are zero
+summary <- summary %>% add_row(Age = "Adult", seurat_clusters = "0", n = 0, .before = 1) %>% add_row(Age = "Adult", seurat_clusters = "4", n = 0, .before = 5) %>% add_row(Age = "Adult", seurat_clusters = "5", n = 0, .before = 6) %>% add_row(Age = "P10", seurat_clusters = "1", n = 0, .before = 8) %>% add_row(Age = "P10", seurat_clusters = "3", n = 0, .before = 10) %>% add_row(Age = "P6", seurat_clusters = "1", n = 0, .before = 14)  %>% add_row(Age = "P6", seurat_clusters = "3", n = 0, .before = 16) 
+
+# number of cells in each Age group
+age_number <- as.data.frame(meta_to_use %>% group_by(Age) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(Age == "Adult" ~ n/age_number[1, 2]*100, Age == "P10" ~ n/age_number[2, 2]*100, Age == "P6" ~ n/age_number[3, 2]*100))
+
+# actual population graph
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_cluster_population_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_percentage_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = Age), position = position_dodge()) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = Age), position = position_dodge()) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off() 
+
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100))
+# order the data using Adult data
+Adult_data <- summary %>% filter (Age == "Adult")
+Adult_table <- Adult_data[, c(2, 5)]
+cluster_levels <- Adult_table[order(Adult_table$percentage_norm), ]$seurat_clusters
+summary$seurat_clusters <- factor(summary$seurat_clusters,levels = cluster_levels)
+# normalised percentage graph
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_normalised_percentage_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = Age)) + scale_fill_manual(values = c("#601A4A", "#EE442F", "#63ACBE")) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 400, height = 800)
+dev.off()
+
+# Calculate the dominant group
+summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 40 ~ "Y", percentage_norm < 40 ~ "N"))
+write.csv(summary, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_summary_percentage_dominant.csv")
+
+# Also, a new round of GO analysis 
+length <- length(unique(proliferative_cluster@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(proliferative_cluster, idents = as.character(i))
+        expr <- cluster@assays$integrated@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 3000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                      geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+                      coord_flip() +
+                      ggtitle(paste0("Mouse proliferative cluster ", i)) +
+                      ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                      theme_classic() + 
+                      theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+} 
+
+# Add more information to metadata
+proliferative_cluster@meta.data <- proliferative_cluster@meta.data %>% mutate(Stage = case_when(Age == "Adult" ~ "Adult", Age == "P6" ~ "Neonates", Age == "P10" ~ "Neonates"))
+
+# Change default ident to Stage (Neonates and Adult)
+Idents(proliferative_cluster) <- "Stage"
+
+# DE analysis will be performed using both scDD and MAST (implemented in Seurat, need to install the MAST package)
+proliferativeDE <- FindMarkers(proliferative_cluster, ident.1 = "Neonates", ident.2 = "Adult", logfc.threshold = 1, min.pct = 0.5, min.diff.pct = 0.5, only.neg = FALSE)
+
+proliferativeDE.pos <- FindMarkers(proliferative_cluster, ident.1 = "Neonates", ident.2 = "Adult", logfc.threshold = 1, min.pct = 0.5, min.diff.pct = 0.5, only.pos = TRUE)
+
+proliferativeDE.neg <- proliferativeDE %>% rownames_to_column("gene") %>% filter (gene %!in% rownames(proliferativeDE.pos)) %>% column_to_rownames("gene")
+    
+top10.pos <- proliferativeDE.pos %>% rownames_to_column("gene") %>% top_n(n = 10, wt = abs(avg_logFC)) %>% column_to_rownames("gene") # Positive values indicate that the gene is more highly expressed in the first group 
+top15.pos <- proliferativeDE.pos %>% rownames_to_column("gene") %>% top_n(n = 15, wt = abs(avg_logFC)) %>% column_to_rownames("gene") # Positive values indicate that the gene is more highly expressed in the first group 
+top20.pos <- proliferativeDE.pos %>% rownames_to_column("gene") %>% top_n(n = 20, wt = abs(avg_logFC)) %>% column_to_rownames("gene") # library(tibble)
+top10.neg <- proliferativeDE.neg %>% rownames_to_column("gene") %>% top_n(n = 10, wt = abs(avg_logFC)) %>% column_to_rownames("gene")
+top15.neg <- proliferativeDE.neg %>% rownames_to_column("gene") %>% top_n(n = 15, wt = abs(avg_logFC)) %>% column_to_rownames("gene")
+top20.neg <- proliferativeDE.neg %>% rownames_to_column("gene") %>% top_n(n = 20, wt = abs(avg_logFC)) %>% column_to_rownames("gene")
+avg.c10.cells <- log1p(AverageExpression(proliferative_cluster, verbose = FALSE)$RNA) # I understand normally this will be calculated using the RNA slot data. 
+avg.c10.cells$gene <- rownames(avg.c10.cells)
+points.c10 <- c(rownames(top10.pos), rownames(top10.neg))
+p1.c10 <- ggplot(avg.c10.cells, aes(Neonates, Adult)) + geom_point(shape = 21, fill = "yellow", color = "grey", size = 2) + geom_abline(slope = 1, lty = 2 , size = 1.25) + theme_classic() + theme( axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + xlim(0, 0) + ylim(0, 400)
+p1.c10 <- LabelPoints(plot = p1.c10, points = points.c10, repel = TRUE, col = "black", xnudge = 0, ynudge = 0, size = 6)
+# replot the data using volcano plot
+library(EnhancedVolcano)
+library(grid)
+library(gridExtra)
+# pos markers
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/new_healthy_integrated_filtered_proliferativeDE_pos.png"), res = 600, width = 5000, height = 5000)
+EnhancedVolcano(proliferativeDE, lab = rownames(proliferativeDE), selectLab = rownames(top10.pos), x = "avg_logFC", y = "p_val_adj", xlim = c(-10, 10), pCutoff = 10e-20, FCcutoff = 1, boxedLabels = TRUE, drawConnectors = TRUE, col = c("grey", "black", "black", "red"), colAlpha = 1, xlab = expression("Log"[e]~"fold change"), legendLabels = c('NS', expression(Log[e]~FC), "p-value", expression(p-value~and~log[e]~FC)), subtitle = NULL, title = "Neonates vs. Adults - upregulated", titleLabSize = 16, pointSize = 2.0, labSize = 5.0, colConnectors = 'grey30') # The point size is not changable. 
+dev.off()
+# neg markers
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/new_healthy_integrated_filtered_proliferativeDE_neg.png"), res = 600, width = 5000, height = 5000)
+EnhancedVolcano(proliferativeDE, lab = rownames(proliferativeDE), selectLab = rownames(top10.neg), x = "avg_logFC", y = "p_val_adj", xlim = c(-10, 10), pCutoff = 10e-20, FCcutoff = 1, boxedLabels = TRUE, drawConnectors = TRUE, col = c("grey", "black", "black", "red"), colAlpha = 1, xlab = expression("Log"[e]~"fold change"), legendLabels = c('NS', expression(Log[e]~FC), "p-value", expression(p-value~and~log[e]~FC)), subtitle = NULL, title = "Neonates vs. Adults - downregulated", titleLabSize = 16, pointSize = 2.0, labSize = 5.0, colConnectors = 'grey30') # The point size is not changable. 
+dev.off()
+# both markers
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/new_healthy_integrated_filtered_proliferativeDE_both.png"), res = 600, width = 4200, height = 4200)
+EnhancedVolcano(proliferativeDE, lab = rownames(proliferativeDE), selectLab = c(rownames(top10.neg), rownames(top10.pos)), x = "avg_logFC", y = "p_val_adj", xlim = c(-10, 10), pCutoff = 10e-20, FCcutoff = 1, boxedLabels = TRUE, drawConnectors = TRUE, col = c("grey", "black", "black", "red"), colAlpha = 1, xlab = expression("Log"[e]~"fold change"), legendLabels = c('NS', expression(Log[e]~FC), "p-value", expression(p-value~and~log[e]~FC)), legendLabSize = 20, title = "Neonates vs. Adults (proliferative cluster)", titleLabSize = 20, pointSize = 2, labSize = 6.0, colConnectors = 'grey30', subtitle = NULL) # The point size is not changable. 
+dev.off()
+```
+</div>
+
+<div class = "teal">
+```{r scDD_all, warning = FALSE, message = FALSE}
+library(scDD)
+library(SingleCellExperiment)
+### REMEMBER this step will lose a lot of information including the SCT and integrated assay completely
+### proliferative.sce <- as.SingleCellExperiment(proliferative_cluster) # remember to check that there is a group/condition column in the metadata. I WILL BUILD IT FROMS SCRATCH
+# proliferative_cluster has three assays RNA, SCT and integrated
+# they have different number of genes in each assay
+# counts <- proliferative_cluster@assays$RNA@counts # RNA assay only has counts useful; SCT has data useful; integrated only has data useful
+
+## construct sce object for proliferative_cluster
+sce <- SingleCellExperiment(assays = list (counts = as.matrix(proliferative_cluster@assays$SCT@counts), normcounts = as.matrix(proliferative_cluster@assays$SCT@data)), rowData = data.frame(gene_names = rownames (proliferative_cluster@assays$SCT@data)), colData = data.frame (cell_names = colnames (proliferative_cluster@assays$SCT@data), condition = proliferative_cluster@meta.data$Stage), metadata = proliferative_cluster@meta.data[, c(1:9, 11, 31:33, 55)], reducedDims = list(PCA = proliferative_cluster@reductions$pca@cell.embeddings, UMAP = proliferative_cluster@reductions$umap@cell.embeddings))
+
+# Now, apply thepreprocessfunction with thezero.threshargument set to 0.9 so that genesare filtered out if they are 90 (or more) percent zero.
+sce <- preprocess(sce, zero.thresh = 0.9)
+show(sce)
+# Now, apply the preprocess function again, but this time use a more stringent threshold onthe proportion of zeroes and apply normalization using size factors calculated using thescran.
+sce <- preprocess(sce, zero.thresh = 0.5, scran_norm = TRUE)
+show(sce)
+
+prior_param = list (alpha = 0.01, mu0 = 0, s0 = 0.01, a0 = 0.01, b0 = 0.01) # this setting has been proved robust for many situations by the author
+
+sce <- scDD(sce, prior_param = prior_param, testZeroes = TRUE, condition = "condition", permutations = 100) # the permutation step takes a VERY VERY long time
+
+# results function used to extract the results
+sce.result <- results(sce)
+
+sce.filteredresult <- sce.result %>% filter (DDcategory %in% c("DE", "DP", "DM", "DB")) %>% filter (nonzero.pvalue.adj < 0.05) %>%  arrange(nonzero.pvalue.adj)
+write.csv(sce.filteredresult, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster_scDD_result.csv")
+
+# VlnPlot from Seurat and sideViolin from scDD show very different results
+VlnPlot(proliferative_cluster, features = "Malat1", group.by = "Stage", cols = c("#601A4A", "#A17B87"))
+
+for (i in rownames(sce.filteredresult)) {
+    png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_scDD_", i,"_plot", ".png"), res = 300, width = 800, height = 1000)
+    print(sideViolin(normcounts(sce)[i,], sce$condition, title.gene = paste0(i, " scDD", ":", sce.filteredresult[i,]$DDcategory), axes.titles = FALSE) + scale_fill_manual(values = c("#7F2A49", "#71EEB8")) + theme (axis.text.x = element_text(family = "Open Sans", colour = "black"), axis.text.y = element_text(family = "Open Sans", colour = "black")), plot.title = element_text(family = "Open Sans", face = "plain", vjust = 2.5)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+}
+```
+</div>
+
+<div class = "teal">
+```{r scDD_neo, warning = FALSE, message = FALSE}
+library(scDD)
+library(SingleCellExperiment)
+### REMEMBER this step will lose a lot of information including the SCT and integrated assay completely
+### proliferative.sce <- as.SingleCellExperiment(proliferative_cluster) # remember to check that there is a group/condition column in the metadata. I WILL BUILD IT FROMS SCRATCH
+# proliferative_cluster has three assays RNA, SCT and integrated
+# they have different number of genes in each assay
+# counts <- proliferative_cluster@assays$RNA@counts # RNA assay only has counts useful; SCT has data useful; integrated only has data useful
+Idents(proliferative_cluster) <- "Age"
+neo <- subset(proliferative_cluster, idents = c("P6", "P10"))
+
+## construct sce object for proliferative_cluster
+sce <- SingleCellExperiment(assays = list (counts = as.matrix(neo@assays$SCT@counts), normcounts = as.matrix(neo@assays$SCT@data)), rowData = data.frame(gene_names = rownames (neo@assays$SCT@data)), colData = data.frame (cell_names = colnames (neo@assays$SCT@data), condition = neo@meta.data$Age), metadata = neo@meta.data[, c(1:9, 11, 31:33)], reducedDims = list(PCA = neo@reductions$pca@cell.embeddings, UMAP = neo@reductions$umap@cell.embeddings))
+
+# Now, apply thepreprocessfunction with thezero.threshargument set to 0.9 so that genesare filtered out if they are 90 (or more) percent zero.
+sce <- preprocess(sce, zero.thresh = 0.9)
+show(sce)
+# Now, apply the preprocess function again, but this time use a more stringent threshold onthe proportion of zeroes and apply normalization using size factors calculated using thescran.
+sce <- preprocess(sce, zero.thresh = 0.5, scran_norm = TRUE)
+show(sce)
+
+prior_param = list (alpha = 0.01, mu0 = 0, s0 = 0.01, a0 = 0.01, b0 = 0.01) # this setting has been proved robust for many situations by the author
+
+sce <- scDD(sce, prior_param = prior_param, testZeroes = TRUE, condition = "condition", permutations = 100) # the permutation step takes a VERY VERY long time
+
+# results function used to extract the results
+sce.result <- results(sce)
+
+sce.filteredresult <- sce.result %>% filter (DDcategory %in% c("DE", "DP", "DM", "DB")) %>% filter (nonzero.pvalue.adj < 0.05) %>%  arrange(nonzero.pvalue.adj)
+write.csv(sce.filteredresult, file = "~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/neo_proliferative_cluster_scDD_result.csv")
+
+# This method doesn't seem to be able to find the DE between P6 and P10
+```
+</div>
+
+### Step 9 Overlap between scDD and Seurat DEs
+Look at the overlap between two DE lists from scDD and Seurat.
+<div class = "teal">
+```{r scDD, warning = FALSE, message = FALSE}
+scDDDE.proliferative <- rownames(sce.filteredresult)
+SeuratDE.prliferative <- rownames(proliferativeDE)
+library(VennDiagram)
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/scDDDEandSeuratVennDiagram.png"), res = 600, width = 1000, height = 1000)
+vennplot <- venn.diagram(list(scDDDE.proliferative, SeuratDE.prliferative), NULL, fill = c("#5F4B8BFF", "#E69A8DFF"), alpha = c(0.5,0.5), category.names = c("DEGs from scDD", "DEGs from Seurat"), cat.pos = c(-15, 15), cat.dist = c(0.055, 0.1))
+grid.draw(vennplot)
+dev.off()
+# intersect between scDD DD and Seurat DE
+overlap <- intersect(scDDDE.proliferative, SeuratDE.prliferative)
+# intersect between pos Seurat and the overlap
+list.pos <- intersect(overlap, rownames(proliferativeDE.pos))
+# only two genes, Tnnt2 and Airn
+# intersect between neg Seurat and the overlap
+list.neg <- intersect(overlap, rownames(proliferativeDE.neg))
+# 132 in total
+# GO analysis for the overlapped genes upregulated in Adult compared to neonates
+cluster <- proliferative_cluster
+expr <- cluster@assays$integrated@data
+expressed.genes <- list.neg # use downregulated genes in adult
+all.genes <- rownames(expr)
+geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+Go_table_touse <- GO_table[1:10, ] # choose the top 10 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value, Go_table_touse$GO.ID)])
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_overlap_neg_GO.png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", width = 0.6, fill = "#7B4765") + coord_flip() +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+# GO analysis for the overlapped genes downregulated in Adult compared to neonates
+cluster <- proliferative_cluster
+expr <- cluster@assays$integrated@data
+expressed.genes <- rownames(proliferativeDE.pos)
+all.genes <- rownames(expr)
+geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+Go_table_touse <- GO_table[1:10, ] # choose the top 10 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_overlap_pos_GO.png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", width = 0.6, fill = "#477b73") + coord_flip() +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+# plot the two overlap pos genes
+DefaultAssay(proliferative_cluster) <- "integrated"
+FeaturePlot(proliferative_cluster, features = c("Airn", "Tnnt2"), split.by = "Stage", cols = c( "#E69A8DFF", "#5F4B8BFF"), pt.size = 2)
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/VlnPlot_Airn_for_common_DE_proliferative_cluster.png", res = 300, width = 1000, height = 1000)
+VlnPlot(proliferative_cluster, features = c("Airn"), group.by = "Stage", cols = c("#7B4765", "#477b73"), pt.size = 0) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(size = 18, hjust = 0.5)) + NoLegend()
+dev.off()
+png("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/VlnPlot_Tnnt2_for_common_DE_proliferative_cluster.png", res = 300, width = 1000, height = 1000)
+VlnPlot(proliferative_cluster, features = c("Tnnt2"), group.by = "Stage", cols = c("#7B4765", "#477b73"), pt.size = 0) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(size = 18, hjust = 0.5)) + NoLegend()
+dev.off()
+```
+</div>
+
+Next, I'm going to try scrat to do the trajectory analysis. Bite me!!
+
+<div class = "teal">
+```{r scrat, warning = FALSE, message = FALSE}
+### use integrated data
+proliferative_cluster <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/proliferative_cluster.rds")
+rownames(proliferative_cluster@meta.data) <- colnames(proliferative_cluster@assays$integrated@scale.data)
+DefaultAssay(proliferative_cluster) <- "integrated"
+df1 <- as.data.frame(t(as.matrix(proliferative_cluster@assays$integrated@scale.data)))
+proliferative_cluster@meta.data <- proliferative_cluster@meta.data %>% mutate(color = case_when(Age == "Adult" ~ "#601A4A", Age == "P6" ~ "#63ACBE", Age == "P10" ~ "#EE442F"))
+df2 <- data.frame(cell_id = rownames(df1), experiment = "Healthy_Mouse_Meta", assignment_LB = proliferative_cluster@meta.data$Age, color = proliferative_cluster@meta.data$color, row.names = rownames(df1))
+dfFinal <- cbind(df2, df1)
+dfFinal[1:5, 1:5] # check the input is ready
+# Assign groups and colors
+SOM.assign <- as.character(dfFinal$assignment_LB)
+SOM.color <- as.character(dfFinal$color)
+# This is a step for selecting protein coding genes.
+# I decided to skip this in ther first place because I'm interested in noncoding genes as well
+# Select for genecode genes only
+# gencode <- read.table("gencode.v22.annotation.protein_coding_gene_name.txt",header=T)
+# gencode.list <- as.character(gencode$gene_id)
+# gencode.genes<-intersect(gencode.list, colnames(df))
+# df<-df[,gencode.genes]
+# Apply a variance cutoff
+# I will directly follow this instead
+# 2 means the function will be applied to the column
+# it's really interesting that which changed its behaviour
+# dfFinal <- dfFinal[, which(apply(dfFinal, 2, var) > 1)]
+##dfFinal <- dfFinal[, c(1:4, which(apply(dfFinal[, 5:17955], 2, var) > 1))]
+# dfFinal <- dfFinal[, which(colSums(dfFinal > 0) > 2 & colSums(dfFinal > 5) < nrow(dfFinal))]
+##dfFinal <- dfFinal[, c(1:4, which(colSums(dfFinal[, 5:1041] > 0) > 2 & colSums(dfFinal[, 5:1041] > 5) < nrow(dfFinal)))]
+dfFinal <- t(dfFinal) 
+# Set up the environment
+env <- scrat.new(list(dataset.name = "wishful",
+                      dim.1stLvlSom = 50,
+                      dim.2ndLvlSom = 20,
+                      training.extension = 1,
+                      rotate.SOM.portraits = 0,
+                      flip.SOM.portraits = F,
+                      database.dataset = "mmusculus_gene_ensembl",
+                      database.id.type = "mgi_symbol",
+                      geneset.analysis = T,
+                      geneset.analysis.exact = F,
+                      spot.coresize.modules = 3,
+                      spot.threshold.modules = 0.95,
+                      spot.coresize.groupmap = 5,
+                      spot.threshold.groupmap = 0.75,
+                      pseudotime.estimation = list(
+                              n.waypoints = 20,
+                              n.iterations = 20,
+                              k = 30,
+                              I = 5,
+                              initiator.sample = "Adult"),
+                      feature.centralization = T,
+                      sample.quantile.normalization = T,
+                      pairwise.comparison.list = list()))
+# env setup nicely done
+# Load input datainto environment
+env$indata <- dfFinal # check
+# Define sample groups
+env$group.labels <- SOM.assign
+#env$group.labels <-"auto"
+# Define sample colors(optional)
+env$group.colors <- SOM.color # check
+#env$group.colors<-c("col1","col2",...)[match(env$group.labels, unique(env$group.labels))
+# Pipeline execution
+scrat.run(env) # for HTTP error just load the Biomart library
+# the pipeline is successful with the counts data
+```
+</div>
