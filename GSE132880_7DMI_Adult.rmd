@@ -1,0 +1,346 @@
+---
+title: "GSE132880_7DMI_Adult"
+author: "Cass Li"
+date: "22/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+### Step 1 Load libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(monocle)
+library(Biobase)
+library(scrat)
+library(plotly)
+library(scran)
+library(GENIE3)
+library(RcisTarget)
+# library(monocle3)
+```
+</div>
+
+Our data.
+
+### Step 2 Load datasets for MI.
+
+<div class = "teal">
+```{r cache = TRUE}
+MI_rep1_data <-  Read10X(data.dir = "~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/RawFiles/GSE132880/MI244_out/filtered_gene_bc_matrices/mm10/")
+MI_rep1 <- CreateSeuratObject(MI_rep1_data, project = "MI_rep1", assay = "RNA", min.cells = 3, min.features = 200)
+MI_rep1 <- RenameCells(object = MI_rep1, new.names = paste0("MI_rep1_", Cells(x = MI_rep1)))
+MI_rep1[["percent.mt"]] <- PercentageFeatureSet(MI_rep1, pattern = "^mt-")
+# fix the metadata
+MI_rep1@meta.data$age <- "Adult"
+MI_rep1@meta.data$species <- "Mouse"
+MI_rep1@meta.data$rep_no <- 1
+MI_rep1@meta.data$condition <- "7D_MI"
+MI_rep1@meta.data$group <- paste0(MI_rep1@meta.data$condition, " ", MI_rep1@meta.data$species)
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MIrep1QC.png", width = 600, height = 400)
+VlnPlot(MI_rep1, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+# Filtering of each dataset is based on the same cut off
+MI_rep1 <- subset(MI_rep1, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+MI_rep1 <- NormalizeData(MI_rep1) # normalise before cell cycle score
+MI_rep1 <- CellCycleScoring(MI_rep1, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) # need to remove Nek2 from the g2m gene list as it's not in any of the datasets. Error still occurs when running it and try the solution in the issue #1244 solution by running a normalisation step first and it works!!
+# Use scTransform to normalise datasets
+MI_rep1 <- SCTransform(MI_rep1, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score")) # default assay is now set to SCT
+saveRDS(MI_rep1, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MI_rep1.rds")
+
+MI_rep2_data <-  Read10X(data.dir = "~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/RawFiles/GSE132880/MI250_out/filtered_gene_bc_matrices/mm10/")
+MI_rep2 <- CreateSeuratObject(MI_rep2_data, project = "MI_rep2", assay = "RNA", min.cells = 3, min.features = 200)
+MI_rep2 <- RenameCells(object = MI_rep2, new.names = paste0("MI_rep2_", Cells(x = MI_rep2)))
+MI_rep2[["percent.mt"]] <- PercentageFeatureSet(MI_rep2, pattern = "^mt-")
+# fix the metadata
+MI_rep2@meta.data$age <- "Adult"
+MI_rep2@meta.data$species <- "Mouse"
+MI_rep2@meta.data$rep_no <- 2
+MI_rep2@meta.data$condition <- "7D_MI"
+MI_rep2@meta.data$group <- paste0(MI_rep2@meta.data$condition, " ", MI_rep2@meta.data$species)
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MIrep2QC.png", width = 600, height = 400)
+VlnPlot(MI_rep2, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+# Filtering of each dataset is based on the same cut off
+MI_rep2 <- subset(MI_rep2, subset = nFeature_RNA > 200 & nFeature_RNA < 4500 & percent.mt < 20)
+# calculate cell cycle score
+MI_rep2 <- NormalizeData(MI_rep2) # normalisation required before cell cycle scoring
+MI_rep2 <- CellCycleScoring(MI_rep2, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE)
+# Use scTransform to normalise datasets
+MI_rep2 <- SCTransform(MI_rep2, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score"))
+saveRDS(MI_rep2, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MI_rep2.rds")
+
+MI_rep3_data <-  Read10X(data.dir = "~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/RawFiles/GSE132880/MI255_out/filtered_gene_bc_matrices/mm10/")
+MI_rep3 <- CreateSeuratObject(MI_rep3_data, project = "MI_rep3", assay = "RNA", min.cells = 3, min.features = 200)
+MI_rep3 <- RenameCells(object = MI_rep3, new.names = paste0("MI_rep3_", Cells(x = MI_rep3)))
+MI_rep3[["percent.mt"]] <- PercentageFeatureSet(MI_rep3, pattern = "^mt-")
+# fix the metadata
+MI_rep3@meta.data$age <- "Adult"
+MI_rep3@meta.data$species <- "Mouse"
+MI_rep3@meta.data$rep_no <- 3
+MI_rep3@meta.data$condition <- "7D_MI"
+MI_rep3@meta.data$group <- paste0(MI_rep3@meta.data$condition, " ", MI_rep3@meta.data$species)
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MIrep3QC.png", width = 600, height = 400)
+VlnPlot(MI_rep3, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+# Filtering of each dataset is based on the same cut off
+MI_rep3 <- subset(MI_rep3, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+# Calculate cell cycle score
+# calculate cell cycle score
+MI_rep3 <- NormalizeData(MI_rep3) # normalisation required before cell cycle scoring
+MI_rep3 <- CellCycleScoring(MI_rep3, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) # Nek2 removed
+MI_rep3 <- SCTransform(MI_rep3, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score"))
+saveRDS(MI_rep3, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MI_rep3.rds")
+
+MI_rep4_data <-  Read10X(data.dir = "~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/RawFiles/GSE132880/MI256_out/filtered_gene_bc_matrices/mm10/")
+MI_rep4 <- CreateSeuratObject(MI_rep4_data, project = "MI_rep4", assay = "RNA", min.cells = 3, min.features = 200)
+MI_rep4 <- RenameCells(object = MI_rep4, new.names = paste0("MI_rep4_", Cells(x = MI_rep4)))
+MI_rep4[["percent.mt"]] <- PercentageFeatureSet(MI_rep4, pattern = "^mt-")
+# fix the metadata
+MI_rep4@meta.data$age <- "Adult"
+MI_rep4@meta.data$species <- "Mouse"
+MI_rep4@meta.data$rep_no <- 4
+MI_rep4@meta.data$condition <- "7D_MI"
+MI_rep4@meta.data$group <- paste0(MI_rep4@meta.data$condition, " ", MI_rep4@meta.data$species)
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MIrep4QC.png", width = 600, height = 400)
+VlnPlot(MI_rep4, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+# Filtering of each dataset is based on the same cut off
+MI_rep4 <- subset(MI_rep4, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+# Calculate cell cycle score
+# calculate cell cycle score
+MI_rep4 <- NormalizeData(MI_rep4) # normalisation required before cell cycle scoring
+MI_rep4 <- CellCycleScoring(MI_rep4, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) # Nek2 removed
+MI_rep4 <- SCTransform(MI_rep4, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score"))
+saveRDS(MI_rep4, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/MI_rep4.rds")
+
+# combine the QC data
+qc_MI_rep1 <- MI_rep1@meta.data[, 1:5]
+qc_MI_rep2 <- MI_rep2@meta.data[, 1:5]
+qc_MI_rep3 <- MI_rep3@meta.data[, 1:5]
+qc_MI_rep4 <- MI_rep4@meta.data[, 1:5]
+qc <- rbind(qc_MI_rep1, qc_MI_rep2, qc_MI_rep3, qc_MI_rep4)
+
+# use 'download as png' to save
+plot_ly(qc, y = ~ nCount_RNA, color = ~ orig.ident, type = "box", colors = c("#383745","#A17724", "#9E9CC2", "#2A385B")) %>% layout(showlegend = F, autosize = F, width = 500, height = 500, xaxis = list(tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nCount_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ nFeature_RNA, color = ~ orig.ident, type = "box", colors = c("#383745","#A17724", "#9E9CC2", "#2A385B")) %>% layout(showlegend = F, autosize = F, width = 500, height = 500, xaxis = list(tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nFeature_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ percent.mt, color = ~ orig.ident, type = "box", colors = c("#383745","#A17724", "#9E9CC2", "#2A385B")) %>% layout(showlegend = F, autosize = F, width = 500, height = 500, xaxis = list(tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "percent.mt", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+gene2.touse <- union(rownames(MI_rep1), rownames(MI_rep2))
+gene1.touse <- union(rownames(MI_rep3), gene2.touse)
+gene.touse <- union(rownames(MI_rep4), gene1.touse)
+```
+</div>
+
+### Step 3 Integrate 4 replicates for MI.
+
+All four datasets are now SCTransformed and the default assay is set to "SCT".
+
+<div class = "teal">
+```{r integrate_MI_replicates, warnings = FALSE, message = FALSE}
+# select features for integration
+options(future.globals.maxSize = 3000 * 1024^2) # it worked
+MI_features <- SelectIntegrationFeatures(object.list = c(MI_rep1, MI_rep2, MI_rep3, MI_rep4), nfeatures = 3000)
+MI_list <- PrepSCTIntegration(object.list = c(MI_rep1, MI_rep2, MI_rep3, MI_rep4), anchor.features = MI_features, verbose = FALSE) # error: exceeds the maximum allowed size of 500.00 MiB and adjust the limit to 1 GB in the previous line
+# Identify the anchors - this step takes a while
+MI_anchors <- FindIntegrationAnchors(object.list = MI_list, normalization.method = "SCT", anchor.features = MI_features, verbose = FALSE)
+# Integrate data Can't use all the genes, the machine is not powerful enough. Going back to the default setting. 
+MI_integrated <- IntegrateData(anchorset = MI_anchors, normalization.method = "SCT", verbose = FALSE) # this step reported the existence of duplicated cell names
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+```
+</div>
+
+<div class = "teal">
+```{r downstream_analysis, message = FALSE, warning = FALSE}
+MI_integrated <- RunPCA(MI_integrated, verbose = FALSE)
+set.seed(1024)
+MI_integrated <- RunUMAP(MI_integrated, dims = 1:30)
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+png("MI_Integrated_UMAP_by_rep_no.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_integrated, combine = FALSE, group.by = "rep_no", pt.size = 1)
+dev.off()
+png("MI_Integrated_UMAP_split_by_rep_no.png", res = 300, width = 7500, height = 2500)
+DimPlot(MI_integrated, combine = FALSE, split.by = "rep_no", pt.size = 1)
+dev.off()
+```
+</div>
+
+### Step 4 FindNeighbors and FindClusters (on default assay which is "integrated")
+
+<div class = "teal">
+```{r clustering, message = FALSE, warning = FALSE}
+MI_integrated <- FindNeighbors(MI_integrated, dims = 1:30)
+
+for (i in 1:20) {
+        MI_integrated <- FindClusters(MI_integrated, resolution = 0.1*i)
+}
+png("GSE132880_MI_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(MI_integrated) # cluster tree visualisation
+dev.off()
+png("GSE132880_MI_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(MI_integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.4 is a good choice and change the clusters to the res 0.4 one
+MI_integrated@meta.data$seurat_clusters <- MI_integrated@meta.data$integrated_snn_res.0.4
+MI_integrated <- FindClusters(MI_integrated, resolution = 0.4) # run it again
+
+png("GSE132880_clustering_MI_integrated.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(MI_integrated, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find cluster markers using the clustering information in this assay
+MI_integrated_markers <- FindAllMarkers(MI_integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+MI_integrated_markers_top10 <- MI_integrated_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(MI_integrated_markers_top10, file = "GSE132880_MI_integrated_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(MI_integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(MI_integrated, idents = as.character(i))
+        expr <- cluster@assays$integrated@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("GSE132880_MI_integrated_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("GSE132880_MI_integrated_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+                coord_flip() +
+                ggtitle(paste0("Adult MI Cluster ", i)) +
+                ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                theme_classic() + 
+                theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+```
+</div>
+
+### Step 5 Change default assay to "SCT"; normalize then generate FeaturePlots 
+
+The reason of changing back to RNA assay is because the integrated assay only has 3000 genes and values from SCT assay represent the SCT normalized values for each dataset, prior to integration.
+
+<div class = "teal">
+```{r feature_plot, warning = FALSE, message = FALSE}
+DefaultAssay(object = MI_integrated) <- "RNA"
+png("GSE132880_MI_integrated_RNAassay_Pecam1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(MI_integrated, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(MI_integrated, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+```
+</div>
+
+### Step 6 Extract Endothelial cells using AUCell
+
+<div class = "teal">
+```{r feature_plot, warning = FALSE, message = FALSE}
+saveRDS(MI_integrated, "MI_integrated.rds") # save object 
+# Load count data
+exprMatrix <- MI_integrated@assays$RNA@counts
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+save(exprMatrix, file = "exprMatrix.RData")
+dim(exprMatrix)
+# Set gene set
+ECgenes <- c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4")
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+# Build gene expression rankings for each cell
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "GSE132880_MI_EC_rankings.RData")
+# Calculate enrichment for the gene signatures (AUC)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) # add AUC score to the MI_integrated object
+save(cells_AUC, file = "GSE132880_MI_EC_AUC.RData")
+
+MI_integrated <- readRDS("MI_integrated.rds")
+DefaultAssay(object = MI_integrated) <- "integrated"
+MI_integrated@meta.data$AUC_score <- t(getAUC(cells_AUC))
+saveRDS(MI_integrated, "MI_integrated.rds") # save object 
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE)
+cells_assignment # "The AUC might follow a normal distribution (random gene-set?).  The global distribution overlaps the partial distributions." Very good to see that the FACS is appreciated by the AUCell protocol
+save(cells_assignment, file = "cells_assignment.RData")
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned)
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+
+png("GSE132880_MI_integrated_AUCell_EC_hist.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[3, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[3, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(MI_integrated, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("GSE132880_MI_integrated_RNAassay_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(MI_integrated, cells.highlight = WhichCells(object = MI_integrated, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[3, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(MI_integrated, cells.highlight = WhichCells(object = MI_integrated, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[3, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data - the AUCell package can't assign cells as it's a pretty good normal distribution and I will just save all the cells.
+MI_EC <- subset(MI_integrated, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[3, 1])))
+saveRDS(MI_EC, "GSE132880_MI_EC.rds")
+```
+</div>
