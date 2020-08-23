@@ -1,0 +1,597 @@
+---
+title: "Mouse_MI_EMTAB7376"
+author: "Cass Li"
+date: "22/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+### Step 1 Load libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(monocle)
+library(Biobase)
+library(scrat)
+library(plotly)
+library(scran)
+library(GENIE3)
+library(RcisTarget)
+# library(monocle3)
+```
+</div>
+
+### Step 2 Load datasets.
+
+The author aggregated the data from sham and MI 3D and 7D so the first step is to find out the data structure. The name of each cell is editted by appending group to the cell barcode. 
+
+<div class = "teal">
+```{r cache = TRUE}
+# read raw data
+raw_data <- read.delim("/home/cat/Documents/Project_scRNA_seq_meta_analysis/E_MTAB_7376/TIP_ShamVsMI_days3_7.txt")
+
+# create Seurat object
+Obj <- CreateSeuratObject(counts = raw_data, project = "E_MTAB_7376", min.cells = 10, min.features = 200)
+
+# Extract meta data from row names of the metadata to add more variables to the metadata
+dataset_name <- rownames(Obj@meta.data)
+Obj@meta.data$dataset <- substring(dataset_name, 18)
+
+# Check the dataset variable done properly
+# unique(Obj@meta.data$dataset)
+
+# Since they've only produced data for Sham at day 7, it's better to make it clear in the dataset column as well
+Obj@meta.data$dataset <- plyr::mapvalues(x = Obj@meta.data$dataset, from = c("Sham", "MI_day3", "MI_day7"), to = c("Sham_day7_Obj", "MI_day3_Obj", "MI_day7_Obj"))
+
+# Check how many cells are in each dataset
+table(Obj$dataset)
+
+# Split the dataset by dataset_name
+Obj.list <- SplitObject(Obj, split.by = "dataset")
+
+# construct individual objects and add meta data
+## Sham_7D
+Sham_7D <- Obj.list[[1]]
+Sham_7D[["percent.mt"]] <- PercentageFeatureSet(Sham_7D, pattern = "^mt-")
+Sham_7D@meta.data$age <- "Adult"
+Sham_7D@meta.data$species <- "Mouse"
+Sham_7D@meta.data$condition <- "7D_Sham"
+Sham_7D@meta.data$group <- paste0(Sham_7D@meta.data$condition, " ", Sham_7D@meta.data$species)
+
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_QC.png", width = 600, height = 400)
+VlnPlot(Sham_7D, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+dev.off()
+
+# Filtering of each dataset is based on the same cut off
+Sham_7D <- subset(Sham_7D, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+Sham_7D <- NormalizeData(Sham_7D) # normalise before cell cycle score
+
+Sham_7D <- CellCycleScoring(Sham_7D, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) 
+# need to remove Nek2 from the g2m gene list as it's not in any of the datasets. Error still occurs when running it and try the solution in the issue #1227 solution by running a normalisation step first and it works!!
+
+# Use scTransform to normalise datasets
+Sham_7D <- SCTransform(Sham_7D, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score")) # default assay is now set to SCT
+
+## MI_3D
+MI_3D <- Obj.list[[2]]
+MI_3D[["percent.mt"]] <- PercentageFeatureSet(MI_3D, pattern = "^mt-")
+MI_3D@meta.data$age <- "Adult"
+MI_3D@meta.data$species <- "Mouse"
+MI_3D@meta.data$condition <- "3D_MI"
+MI_3D@meta.data$group <- paste0(MI_3D@meta.data$condition, " ", MI_3D@meta.data$species)
+
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_QC.png", width = 600, height = 400)
+VlnPlot(MI_3D, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+dev.off()
+
+# Filtering of each dataset is based on the same cut off
+MI_3D <- subset(MI_3D, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+MI_3D <- NormalizeData(MI_3D) # normalise before cell cycle score
+
+MI_3D <- CellCycleScoring(MI_3D, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) 
+# need to remove Nek2 from the g2m gene list as it's not in any of the datasets. Error still occurs when running it and try the solution in the issue #1227 solution by running a normalisation step first and it works!!
+
+# Use scTransform to normalise datasets
+MI_3D <- SCTransform(MI_3D, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score")) # default assay is now set to SCT
+
+## MI_7D
+MI_7D <- Obj.list[[3]]
+MI_7D[["percent.mt"]] <- PercentageFeatureSet(MI_7D, pattern = "^mt-")
+MI_7D@meta.data$age <- "Adult"
+MI_7D@meta.data$species <- "Mouse"
+MI_7D@meta.data$condition <- "7D_MI"
+MI_7D@meta.data$group <- paste0(MI_7D@meta.data$condition, " ", MI_7D@meta.data$species)
+
+# Visualise QC metrics
+png(filename = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_QC.png", width = 600, height = 400)
+VlnPlot(MI_7D, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+dev.off()
+
+# Filtering of each dataset is based on the same cut off
+MI_7D <- subset(MI_7D, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+MI_7D <- NormalizeData(MI_7D) # normalise before cell cycle score
+
+MI_7D <- CellCycleScoring(MI_7D, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE) 
+# need to remove Nek2 from the g2m gene list as it's not in any of the datasets. Error still occurs when running it and try the solution in the issue #1227 solution by running a normalisation step first and it works!!
+
+# Use scTransform to normalise datasets
+MI_7D <- SCTransform(MI_7D, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score")) # default assay is now set to SCT
+
+# combine the QC data
+qc_Sham_7D <- Sham_7D@meta.data[, 1:9]
+qc_MI_3D <- MI_3D@meta.data[, 1:9]
+qc_MI_7D <- MI_7D@meta.data[, 1:9]
+qc <- rbind(qc_Sham_7D, qc_MI_3D, qc_MI_7D)
+
+# use 'download as png' to save
+plot_ly(qc, y = ~ nCount_RNA, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nCount_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ nFeature_RNA, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nFeature_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ percent.mt, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "percent.mt", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+```
+</div>
+
+### Step 3 Dimension reduction and clustering of each dataset
+
+<div class = "teal">
+```{r downstream_analysis, message = FALSE, warning = FALSE}
+# Sham 7D
+# dimension reduction
+Sham_7D <- RunPCA(Sham_7D, verbose = FALSE)
+set.seed(1024)
+Sham_7D <- RunUMAP(Sham_7D, dims = 1:30)
+saveRDS(Sham_7D, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(Sham_7D, combine = FALSE, pt.size = 1)
+dev.off()
+
+# find neighbours
+Sham_7D <- FindNeighbors(Sham_7D, dims = 1:30)
+
+for (i in 1:20) {
+        Sham_7D <- FindClusters(Sham_7D, resolution = 0.1*i)
+}
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(Sham_7D) # cluster tree visualisation
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(Sham_7D, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.5 is a good choice and change the clusters to the res 0.5 one
+Sham_7D <- FindClusters(Sham_7D, resolution = 0.5) # this resolution is difficult to determine and the package "clustree" is used to help with all resolution between 0.1 and 2 (with a step of 0.1) tested
+Sham_7D@meta.data$seurat_clusters <- Sham_7D@meta.data$SCT_snn_res.0.5
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_clustering.png", res = 300, width = 2500, height = 2500)
+DimPlot(Sham_7D, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(Sham_7D, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find top markers
+Sham_7D_markers <- FindAllMarkers(Sham_7D, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Sham_7D_markers_top10 <- Sham_7D_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(Sham_7D_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(Sham_7D@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(Sham_7D, idents = as.character(i))
+        expr <- cluster@assays$SCT@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                geom_bar(stat = "identity", fill = colour_touse, width = 0.6) + 
+                coord_flip() +
+                ggtitle(paste0("Sham 7D cluster ", i)) +
+                ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                theme_classic() + 
+                theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face = "bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+
+saveRDS(Sham_7D, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_Pecam1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(Sham_7D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(Sham_7D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Extract endothelial cells
+# Load count data
+exprMatrix <- Sham_7D@assays$SCT@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+# Set gene set
+ECgenes <- c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4")
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_EC_rankings.RData")
+# Calculate enrichment for the gene signatures (AUC)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) 
+# add AUC score to the Sham_7D object
+Sham_7D@meta.data$AUC_score <- t(getAUC(cells_AUC))
+save(cells_AUC, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE)
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned) # 1571 cells
+# L_k2 is a bit too strict and Global _k1 is used instead
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_AUCell_EC_hist.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[1, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[1, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(Sham_7D, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(Sham_7D, cells.highlight = WhichCells(object = Sham_7D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[1, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(Sham_7D, cells.highlight = WhichCells(object = Sham_7D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[1, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data
+Sham_7D_EC <- subset(Sham_7D, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[1, 1])))
+saveRDS(Sham_7D_EC, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/Sham_7D_EC.rds")
+
+# MI 3D
+# dimension reduction
+MI_3D <- RunPCA(MI_3D, verbose = FALSE)
+set.seed(1024)
+MI_3D <- RunUMAP(MI_3D, dims = 1:30)
+saveRDS(MI_3D, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_3D, combine = FALSE, pt.size = 1)
+dev.off()
+
+# find neighbours
+MI_3D <- FindNeighbors(MI_3D, dims = 1:30)
+
+for (i in 1:20) {
+        MI_3D <- FindClusters(MI_3D, resolution = 0.1*i)
+}
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(MI_3D) # cluster tree visualisation
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(MI_3D, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.7 is a good choice and change the clusters to the res 0.7 one
+MI_3D <- FindClusters(MI_3D, resolution = 0.7) # this resolution is difficult to determine and the package "clustree" is used to help with all resolution between 0.1 and 2 (with a step of 0.1) tested
+MI_3D@meta.data$seurat_clusters <- MI_3D@meta.data$SCT_snn_res.0.7
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_clustering.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_3D, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(MI_3D, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find top markers
+MI_3D_markers <- FindAllMarkers(MI_3D, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+MI_3D_markers_top10 <- MI_3D_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(MI_3D_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(MI_3D@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(MI_3D, idents = as.character(i))
+        expr <- cluster@assays$SCT@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                      geom_bar(stat = "identity", fill = colour_touse, width = 0.6) + 
+                      coord_flip() +
+                      ggtitle(paste0("MI 3D cluster ", i)) +
+                      ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                      theme_classic() + 
+                      theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face = "bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+
+saveRDS(MI_3D, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_Pecam1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(MI_3D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(MI_3D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Extract endothelial cells
+# Load count data
+exprMatrix <- MI_3D@assays$SCT@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+# Set gene set
+ECgenes <- c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4")
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_EC_rankings.RData")
+# Calculate enrichment for the gene signatures (AUC)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) 
+# add AUC score to the MI_3D object
+MI_3D@meta.data$AUC_score <- t(getAUC(cells_AUC))
+save(cells_AUC, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE)
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned) # 238 cells
+# L_k2 is a bit too strict and Global _k1 is used instead
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_AUCell_EC_hist.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(MI_3D, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(MI_3D, cells.highlight = WhichCells(object = MI_3D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(MI_3D, cells.highlight = WhichCells(object = MI_3D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data
+MI_3D_EC <- subset(MI_3D, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])))
+saveRDS(MI_3D_EC, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_3D_EC.rds")
+
+# MI 7D
+# dimension reduction
+MI_7D <- RunPCA(MI_7D, verbose = FALSE)
+set.seed(1024)
+MI_7D <- RunUMAP(MI_7D, dims = 1:30)
+saveRDS(MI_7D, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_7D, combine = FALSE, pt.size = 1)
+dev.off()
+
+# find neighbours
+MI_7D <- FindNeighbors(MI_7D, dims = 1:30)
+
+for (i in 1:20) {
+        MI_7D <- FindClusters(MI_7D, resolution = 0.1*i)
+}
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(MI_7D) # cluster tree visualisation
+dev.off()
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(MI_7D, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.5 is a good choice and change the clusters to the res 0.8 one
+MI_7D <- FindClusters(MI_7D, resolution = 0.8) # this resolution is difficult to determine and the package "clustree" is used to help with all resolution between 0.1 and 2 (with a step of 0.1) tested
+MI_7D@meta.data$seurat_clusters <- MI_7D@meta.data$SCT_snn_res.0.8
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_clustering.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI_7D, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(MI_7D, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find top markers
+MI_7D_markers <- FindAllMarkers(MI_7D, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+MI_7D_markers_top10 <- MI_7D_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(MI_7D_markers_top10, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(MI_7D@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(MI_7D, idents = as.character(i))
+        expr <- cluster@assays$SCT@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                      geom_bar(stat = "identity", fill = colour_touse, width = 0.6) + 
+                      coord_flip() +
+                      ggtitle(paste0("MI 3D cluster ", i)) +
+                      ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                      theme_classic() + 
+                      theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face = "bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+
+saveRDS(MI_7D, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D.rds")
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_Pecam1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(MI_7D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(MI_7D, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Extract endothelial cells
+# Load count data
+exprMatrix <- MI_7D@assays$SCT@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+# Set gene set
+ECgenes <- c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4")
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_EC_rankings.RData")
+# Calculate enrichment for the gene signatures (AUC)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) 
+# add AUC score to the MI_7D object
+MI_7D@meta.data$AUC_score <- t(getAUC(cells_AUC))
+save(cells_AUC, file = "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE)
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned) # 1571 cells
+# L_k2 is a bit too strict and Global _k1 is used instead
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_AUCell_EC_hist.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[4, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[4, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(MI_7D, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(MI_7D, cells.highlight = WhichCells(object = MI_7D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[4, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(MI_7D, cells.highlight = WhichCells(object = MI_7D, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[4, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data
+MI_7D_EC <- subset(MI_7D, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[1, 1])))
+saveRDS(MI_7D_EC, "~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/MI_7D_EC.rds")
+```
+</div>
