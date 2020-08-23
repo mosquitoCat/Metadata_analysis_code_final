@@ -1,0 +1,236 @@
+---
+title: "GSE136088_2WMI_Adult"
+author: "Cass Li"
+date: "23/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+### Step 1 Load libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(monocle)
+library(Biobase)
+library(scrat)
+library(plotly)
+library(scran)
+library(GENIE3)
+library(RcisTarget)
+# library(monocle3)
+```
+</div>
+
+Acute myocardial infarction (MI) was modeled in C57BL6/J wild type (WT) 8-10-week-old male mice (The Jackson Laboratories and confirmed via echocardiographic analysis, similar to previously described (Duan, et al., 2017). A left thoracotomy was performed via the fourth intercostal space and the lungs retracted to expose the heart. After opening the pericardium, the left anterior descending coronary artery was ligated with 7-0 silk suture approximately 2 mm below the edge of the left atrial appendage. Ligation was considered successful when the anterior wall of the left ventricle turned pale. The lungs were inflated by increasing positive end-expiratory pressure and the thoracotomy site closed in layers with 6-0 suture. Animals were maintained on a 37 °C heating pad until recovery and for 2 h after surgery. Another group of mice underwent sham ligation, with a similar surgical procedure without tightening the suture around the coronary artery. Mice with an estimated pressure gradient across the aortic constriction below 40 mmHg were not included in the experiments. Hearts were collected at 14 days post-Sham surgery (***n = 4, pooled***) or MI (n=1), perfused with ice-cold PBS to remove red blood cells followed by perfusion with 50 mM KCl to arrest the heart in diastole and then fixed for 4 hours in freshly prepared 4% PFA at 4°C, rinsed with PBS and cryoprotected in 30% sucrose/PBS overnight before embedding in OCT (Tissue-Tek). DropSeq was performed as previously described (Macosko, et al., 2015). The quantity and quality of cDNA was measured using an Agilent Bioanalyzer hsDNA chip. To generate a library cDNA was fragmented and amplified (12 cycles) using the Nextera XT DNA Sample prep kit with three separate reactions of 600, 1,200 and 1,800 pg input cDNA.
+The quantity and quality of cDNA was measured using an Agilent Bioanalyzer hsDNA chip. To generate a library cDNA was fragmented and amplified (12 cycles) using the Nextera XT DNA Sample prep kit with three separate reactions of 600, 1,200 and 1,800 pg input cDNA. The libraries were pooled and purified twice using 0.7X volume of SPRIselect beads. The purified libraries were quantified using an hsDNA chip and were sequenced on an Illumina HiSeq 2500 using the sequencing parameters described in the DropSeq protocol. DropSeq was performed as previously described (Macosko et al., 2015).
+
+### Step 2 Load datasets for MI.
+
+<div class = "teal">
+```{r cache = TRUE}
+MI_data <- read.delim("~/Documents/Project_scRNA_seq_meta_analysis/GSE136088/GSE136088_RAW/GSM4040774_MI-out_gene_exon_tagged.dge.txt.gz")
+MI_data_1 <- MI_data[, -1]
+rownames(MI_data_1) <- MI_data[, 1]
+MI <- CreateSeuratObject(counts = MI_data_1, project = "GSE136088_MI", assay = "RNA", min.cells = 3, min.features = 200)
+MI[["percent.mt"]] <- PercentageFeatureSet(MI, pattern = "^mt-")
+
+# fix the metadata
+MI@meta.data$age <- "Adult" # 8 to 10 weeks
+MI@meta.data$species <- "Mouse"
+MI@meta.data$condition <- "2W_MI"
+MI@meta.data$group <- paste0(MI@meta.data$condition, " ", MI@meta.data$species)
+
+# Visualise QC metrics
+png(filename = "MIQC.png", width = 600, height = 400)
+VlnPlot(MI, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.2)
+dev.off()
+
+# Filtering of each dataset is based on the same cut off
+MI <- subset(MI, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 20)
+
+# Calculate cell cycle scores - these are human genes and can't be used directly. Use homologene package to solve the problem
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+MI <- NormalizeData(MI) # normalise before cell cycle score
+MI <- CellCycleScoring(MI, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE)
+# Use scTransform to normalise datasets
+MI <- SCTransform(MI, vars.to.regress = c("percent.mt", "S.Score", "G2M.Score")) # default assay is now set to SCT
+
+# combine the QC data
+qc <- MI@meta.data[, 1:9]
+
+# use 'download as png' to save
+plot_ly(qc, y = ~ nCount_RNA, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 200, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nCount_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ nFeature_RNA, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 200, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "nFeature_RNA", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(qc, y = ~ percent.mt, color = ~ condition, type = "box", colors = c("#383745","#A17724", "#9E9CC2"), width = 200, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "E-MTAB-7376", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "percent.mt", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+```
+</div>
+
+### Step 3 Dimension reduction and clustering of each dataset
+
+<div class = "teal">
+```{r downstream_analysis, message = FALSE, warning = FALSE}
+# MI 2W
+# dimension reduction
+MI <- RunPCA(MI, verbose = FALSE)
+set.seed(1024)
+MI <- RunUMAP(MI, dims = 1:30)
+saveRDS(MI, file = "MI.rds")
+
+png("MI_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI, combine = FALSE, pt.size = 1)
+dev.off()
+
+# find neighbours
+MI <- FindNeighbors(MI, dims = 1:30)
+
+for (i in 1:20) {
+        MI <- FindClusters(MI, resolution = 0.1*i)
+}
+
+png("MI_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(MI) # cluster tree visualisation
+dev.off()
+
+png("MI_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(MI, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.7 is a good choice and change the clusters to the res 0.7 one
+MI <- FindClusters(MI, resolution = 0.7) # this resolution is difficult to determine and the package "clustree" is used to help with all resolution between 0.1 and 2 (with a step of 0.1) tested
+MI@meta.data$seurat_clusters <- MI@meta.data$SCT_snn_res.0.7
+
+png("MI_clustering.png", res = 300, width = 2500, height = 2500)
+DimPlot(MI, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(MI, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find top markers
+MI_markers <- FindAllMarkers(MI, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+MI_markers_top10 <- MI_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(MI_markers_top10, file = "MI_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## cluster 0 is done first - build a loop to get all clusters' GO
+length <- length(unique(MI@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+        cluster <- subset(MI, idents = as.character(i))
+        expr <- cluster@assays$SCT@data
+        # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+        n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+        expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+        all.genes <- rownames(expr)
+        # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+        geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+        names(geneList) <- all.genes
+        # Create topGOdata object
+        GOdata <- new("topGOdata",
+                      ontology = "BP", # use biological process ontology
+                      allGenes = geneList,
+                      geneSelectionFun = function(x)(x == 1),
+                      annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+        # Test for enrichment using Fisher's Exact Test
+        resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+        GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+        # Save GO table
+        write.csv(GO_table, file = paste0("MI_cluster_", i,"GO_term_table", ".csv"))
+        # Generate GO term bar graph
+        Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+        Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+        Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+        colour_touse <- hue_pal()(length)[i+1]
+        png(paste0("MI_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+        print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+                geom_bar(stat = "identity", fill = colour_touse, width = 0.6) + 
+                coord_flip() +
+                ggtitle(paste0("MI 2W cluster ", i)) +
+                ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+                theme_classic() + 
+                theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face = "bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+        dev.off()
+}
+
+saveRDS(MI, "MI.rds")
+
+png("MI_Pecam1_feature_plot.png", res = 300, width = 2500, height = 2500)
+FeaturePlot(MI, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+p <- FeaturePlot(MI, features = c("Pecam1"), cols = c("lightgrey", "#003333"), pt.size = 1)
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Extract endothelial cells
+# Load count data
+exprMatrix <- MI@assays$SCT@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+# Set gene set
+ECgenes <- c("Pecam1", "Itgb1", "Cd34", "Cd36", "Entpd1", "Cd44", "Cd47", "Icam1", "Itgb3", "Selplg", "Cd80", "Cd86", "Cd93", "Icam2", "Eng", "Vcam1", "Il1r1", "Thbd", "F3", "Ace", "Cdh5", "Mcam", "Bsg", "Cd151", "Cd160", "Pik3cd", "Procr", "Il13ra1", "Cd248", "Kdr", "Adam8", "Adam9", "Adam10", "Adam12", "Adam15", "Adam17", "Adam33", "Adamts13", "Adamts18", "Cxcl16", "Dcbld2", "Emcn", "Esam", "Itga4", "Klf4")
+geneSets <- GeneSet(ECgenes, setName = "endothelial_cells")
+geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "MI_EC_rankings.RData")
+# Calculate enrichment for the gene signatures (AUC)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings) 
+# add AUC score to the MI object
+MI@meta.data$AUC_score <- t(getAUC(cells_AUC))
+save(cells_AUC, file = "MI_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist = TRUE, assign = TRUE)
+cells_assignment$endothelial_cells$aucThr$thresholds
+
+endoAssigned <- cells_assignment$endothelial_cells$assignment
+length(endoAssigned) # 285
+
+geneSetName <- rownames(cells_AUC)[grep("endothelial_cells", rownames(cells_AUC))]
+png("MI_AUCell_EC_hist.png", res = 300, width = 1500, height = 1500)
+AUCell_plotHist(cells_AUC[geneSetName, ], aucThr = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+abline(v = cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])
+dev.off()
+
+# AUCscore as feature plot
+p <- FeaturePlot(MI, features = "AUC_score", cols = viridis::viridis(21)) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+
+png("MI_AUCell_EC.png", res = 300, width = 2750, height = 2500)
+DimPlot(MI, cells.highlight = WhichCells(object = MI, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])) + scale_color_manual(labels = c("non-EC", "EC"), values = c("grey", "red")) + labs(color = "Cell type")
+p <- DimPlot(MI, cells.highlight = WhichCells(object = MI, expression = AUC_score > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1]), sizes.highlight = NULL, cols.highlight = "red") + labs(title = "Endothelial Cell Assignment") + NoLegend() + theme(plot.title = element_text(hjust = 0.5))
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Subset and store the EC data
+MI_EC <- subset(MI, cells = names(which(getAUC(cells_AUC)["endothelial_cells",] > cells_assignment$endothelial_cells$aucThr$thresholds[2, 1])))
+saveRDS(MI_EC, "MI_EC.rds")
+```
+</div>
