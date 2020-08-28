@@ -1,0 +1,854 @@
+---
+title: "3D_7D_2W_MI_mouse_meta"
+author: "Cass Li"
+date: "23/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+### Step 1 Load libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(monocle)
+library(Biobase)
+library(scrat)
+library(plotly)
+library(scran)
+library(GENIE3)
+library(RcisTarget)
+library(loomR)
+library(ensembldb)
+library(EnsDb.Mmusculus.v79)
+```
+</div>
+
+### Step 2: Look at all ***healthy*** datasets first. Load the EC enriched objects.
+
+<div class = "teal">
+```{r load objects}
+# GSE136088 has 2W Sham and 2W MI; GSE132880 has 7D MI and healthy; E-MTAB-7376 has 3D MI, 7D MI and 7D Sham.
+# E-MTAB-7376 3D MI
+ob1 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/E_MTAB_7376/MI_3D_EC.rds")
+# E-MTAB-7376 7D MI
+ob2 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/E_MTAB_7376/MI_7D_EC.rds")
+
+# GSE132880 7D MI, isolate rep 1
+ob3 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE132880/GSE132880_MI_EC.rds")
+## sub set rep 1 out
+Idents(ob3) <- "orig.ident"
+ob3_rep1 <- subset(ob3, idents = "MI_rep1")
+Idents(ob3_rep1) <- "seurat_clusters"
+ob3 <- ob3_rep1
+
+# GSE136088 2W MI
+ob4 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE136088/MI_EC.rds")
+
+# GSE132880 Healthy, isolate rep 1
+ob5 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/P6_P10_Adult_Healthy_mouse_meta/GSE132880_Healthy_EC.rds")
+Idents(ob5) <- "orig.ident"
+ob5_rep1 <- subset(ob5, idents = "Healthy_rep1")
+Idents(ob5_rep1) <- "seurat_clusters"
+ob5 <- ob5_rep1
+
+# E-MTAB-7376 7D Sham
+ob6 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/E_MTAB_7376/Sham_7D_EC.rds")
+
+# GSE136088 2W Sham
+ob7 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/3D_7D_2W_MI_mouse_meta/GSE136088/Sham_EC.rds")
+```
+</div>
+
+### Step 3: Prepare a list of mitochondrial genes to be removed
+
+I remove the mitochondrial genes at the beginning is because remove it later will interfere the normalisation step and downstream analysis.
+
+<div class = "teal">
+```{r remove_mitochondrial_genes}
+# Remove mitochrondrial genes from the dataset using the mt- names and mito carta 2.0 as reference. 
+library(readxl)
+mito.reference <- read_excel("~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/Healthy_mouse_P6_P10_Adult_analysis_run1/mito carta 2.0 reference lists/Mouse.MitoCarta2.0.xls", sheet = 2) # 1158 genes in total
+# filter the reference gene list based on the subcellular localisation provided by the last column " HPA_PrimarySubcellularLocalization_2015".
+mito.touse1 <- dplyr::filter (mito.reference, grepl("Mitochondria", HPA_PrimarySubcellularLocalization_2015))$Symbol # 354 genes in total
+## mitochondrial genes from each object
+mito.touse2 <- grep(pattern = "^mt-", x = rownames(ob1@assays$RNA@counts), value = TRUE)
+mito.touse3 <- grep(pattern = "^mt-", x = rownames(ob2@assays$RNA@counts), value = TRUE)
+mito.touse4 <- grep(pattern = "^mt-", x = rownames(ob3@assays$RNA@counts), value = TRUE)
+mito.touse5 <- grep(pattern = "^mt-", x = rownames(ob4@assays$RNA@counts), value = TRUE)
+mito.touse6 <- grep(pattern = "^mt-", x = rownames(ob5@assays$RNA@counts), value = TRUE)
+mito.touse7 <- grep(pattern = "^mt-", x = rownames(ob6@assays$RNA@counts), value = TRUE)
+mito.touse8 <- grep(pattern = "^mt-", x = rownames(ob7@assays$RNA@counts), value = TRUE)
+
+## combine the lists
+mito.touse <- unique(c(mito.touse1, mito.touse2, mito.touse3, mito.touse4, mito.touse5, mito.touse6, mito.touse7, mito.touse8))
+# define %!in% function
+`%!in%` = Negate(`%in%`)
+```
+</div>
+
+### Step 4: Extract raw counts from each object to create a new object and add necessary new metadata.
+<div class = "teal">
+
+```{r map create new objects and add metadata}
+# E-MTAB-7376 3D MI
+counts.ob1 <- ob1@assays$RNA@counts
+new.counts.ob1 <- counts.ob1[rownames(counts.ob1) %!in% mito.touse, ]
+new.ob1 <- CreateSeuratObject(counts = new.counts.ob1)
+new.ob1@meta.data <- new.ob1@meta.data[, 2:3]
+new.ob1@meta.data <- new.ob1@meta.data %>% mutate (AccessionNo = "E-MTAB-7376", species = "Mouse", age = "Adult", condition = "MI", temp = "3D") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob1@meta.data) <- colnames(new.ob1@assays$RNA@counts)
+saveRDS(new.ob1, file = "new.ob1.rds")
+
+# E-MTAB-7376 7D MI
+counts.ob2 <- ob2@assays$RNA@counts
+new.counts.ob2 <- counts.ob2[rownames(counts.ob2) %!in% mito.touse, ]
+new.ob2 <- CreateSeuratObject(counts = new.counts.ob2)
+new.ob2@meta.data <- new.ob2@meta.data[, 2:3]
+new.ob2@meta.data <- new.ob2@meta.data %>% mutate (AccessionNo = "E-MTAB-7376", species = "Mouse", age = "Adult", condition = "MI", temp = "7D") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob2@meta.data) <- colnames(new.ob2@assays$RNA@counts)
+saveRDS(new.ob2, file = "new.ob2.rds")
+
+# GSE132880 7D MI
+counts.ob3 <- ob3@assays$RNA@counts
+new.counts.ob3 <- counts.ob3[rownames(counts.ob3) %!in% mito.touse, ]
+new.ob3 <- CreateSeuratObject(counts = new.counts.ob3)
+new.ob3@meta.data <- new.ob3@meta.data[, 2:3]
+new.ob3@meta.data <- new.ob3@meta.data %>% mutate (AccessionNo = "GSE132880", species = "Mouse", age = "Adult", condition = "MI", temp = "7D") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob3@meta.data) <- colnames(new.ob3@assays$RNA@counts)
+saveRDS(new.ob3, file = "new.ob3.rds")
+
+# GSE136088 2W MI
+counts.ob4 <- ob4@assays$RNA@counts
+new.counts.ob4 <- counts.ob4[rownames(counts.ob4) %!in% mito.touse, ]
+new.ob4 <- CreateSeuratObject(counts = new.counts.ob4)
+new.ob4@meta.data <- new.ob4@meta.data[, 2:3]
+new.ob4@meta.data <- new.ob4@meta.data %>% mutate (AccessionNo = "GSE136088", species = "Mouse", age = "Adult", condition = "MI", temp = "2W") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob4@meta.data) <- colnames(new.ob4@assays$RNA@counts)
+saveRDS(new.ob4, file = "new.ob4.rds")
+
+# GSE132880 Healthy
+counts.ob5 <- ob5@assays$RNA@counts
+new.counts.ob5 <- counts.ob5[rownames(counts.ob5) %!in% mito.touse, ]
+new.ob5 <- CreateSeuratObject(counts = new.counts.ob5)
+new.ob5@meta.data <- new.ob5@meta.data[, 2:3]
+new.ob5@meta.data <- new.ob5@meta.data %>% mutate (AccessionNo = "GSE132880", species = "Mouse", age = "Adult", condition = "Healthy", temp = "7D") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob5@meta.data) <- colnames(new.ob5@assays$RNA@counts)
+saveRDS(new.ob5, file = "new.ob5.rds")
+
+# E-MTAB-7376 7D Sham
+counts.ob6 <- ob6@assays$RNA@counts
+new.counts.ob6 <- counts.ob6[rownames(counts.ob6) %!in% mito.touse, ]
+new.ob6 <- CreateSeuratObject(counts = new.counts.ob6)
+new.ob6@meta.data <- new.ob6@meta.data[, 2:3]
+new.ob6@meta.data <- new.ob6@meta.data %>% mutate (AccessionNo = "E-MTAB-7376", species = "Mouse", age = "Adult", condition = "Sham", temp = "7D") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob6@meta.data) <- colnames(new.ob6@assays$RNA@counts)
+saveRDS(new.ob6, file = "new.ob6.rds")
+
+# GSE136088 2W Sham
+counts.ob7 <- ob7@assays$RNA@counts
+new.counts.ob7 <- counts.ob7[rownames(counts.ob7) %!in% mito.touse, ]
+new.ob7 <- CreateSeuratObject(counts = new.counts.ob7)
+new.ob7@meta.data <- new.ob7@meta.data[, 2:3]
+new.ob7@meta.data <- new.ob7@meta.data %>% mutate (AccessionNo = "GSE136088", species = "Mouse", age = "Adult", condition = "Sham", temp = "2W") %>% mutate(group = paste0(condition, " ", temp))
+rownames(new.ob7@meta.data) <- colnames(new.ob7@assays$RNA@counts)
+saveRDS(new.ob7, file = "new.ob7.rds")
+
+allgenes5 <- union(rownames(new.ob1), rownames(new.ob2))
+allgenes4 <- union(allgenes5, rownames(new.ob3))
+allgenes3 <- union(allgenes4, rownames(new.ob4))
+allgenes2 <- union(allgenes3, rownames(new.ob5))
+allgenes1 <- union(allgenes2, rownames(new.ob6))
+allgenes <- union(allgenes1, rownames(new.ob7))
+length(allgenes) # 21960
+```
+</div>
+
+### Step 5: SCTransform and integrate the data
+
+<div class = "teal">
+```{r integrate objects, warning = FALSE}
+# change accessible memory
+options(future.globals.maxSize = 10000 * 1024^2)
+# create object list
+MI_list <- c(new.ob1, new.ob2, new.ob3, new.ob4, new.ob5, new.ob6, new.ob7)
+# Integration and Label Transfer standard workflow
+for (i in 1:length(MI_list)) {
+    MI_list[[i]] <- SCTransform(MI_list[[i]], verbose = FALSE)
+}
+
+# Integrate data - it takes awefully long time to finish.
+MI_features <- SelectIntegrationFeatures(object.list = MI_list, nfeatures = 6000)
+save(MI_features, file = "MI_features.RData")
+
+MI_list <- PrepSCTIntegration(object.list = MI_list, anchor.features = MI_features, 
+    verbose = T)
+
+MI_anchors <- FindIntegrationAnchors(object.list = MI_list, normalization.method = "SCT", anchor.features = MI_features, verbose = FALSE) # if the metadata names is not updated then this line is likely to go wrong.
+save(MI_anchors, file = "MI_anchors.RData")
+
+# The initial integration with all replicates from GSE132880 killed the process as the datasets are too large so I decided to drop 3 datasets from the healthy and 3 from the MI to make this process workable. 
+
+MI_integrated <- IntegrateData(anchorset = MI_anchors, normalization.method = "SCT", verbose = FALSE)
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+
+# tried with all the genes but run out of memory
+# MI_integrated <- IntegrateData(anchorset = MI_anchors, normalization.method = "SCT", features.to.integrate = allgenes, verbose = FALSE)
+# save(MI_integrated, file = "allgene_MI_integrated.rds")
+```
+</div>
+
+### Step 6: Downstream analysis
+
+<div class = "teal">
+```{r downstream analysis, message = FALSE, warning = FALSE}
+MI_integrated <- RunPCA(MI_integrated, verbose = FALSE)
+set.seed(1024)
+MI_integrated <- RunUMAP(MI_integrated, dims = 1:50)
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+
+# It's handy to change to reorder the group so the legend doesn't look odd
+MI_integrated$group <- factor(MI_integrated$group, levels = c("Healthy 7D", "Sham 7D", "MI 3D", "MI 7D", "Sham 2W", "MI 2W"))
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+
+png("MI_integrated_UMAP_by_AccessionNo.png", res = 300, width = 1800, height = 1800)
+DimPlot(MI_integrated, group.by = "AccessionNo", pt.size = 1.5)
+dev.off()
+
+png("MI_integrated_UMAP_by_AccessionNo_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(MI_integrated, group.by = "AccessionNo", pt.size = 1.5, cols = c("#FADFE2", "#DECBE3", "#5D6E9E")) + NoLegend()
+p <- DimPlot(MI_integrated, group.by = "AccessionNo", pt.size = 1, cols = c("#FADFE2", "#DECBE3", "#5D6E9E")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# 10 colours
+# col.touse <- c('#88CCEE', '#44AA99', '#117733', '#332288', '#DDCC77', '#999933','#CC6677', '#882255', '#AA4499', '#DDDDDD')
+# 5 colours
+col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+
+png("MI_integrated_UMAP_by_group.png", res = 300, width = 1800, height = 1800)
+DimPlot(MI_integrated, group.by = "group", pt.size = 1.5, cols = col.touse)
+dev.off()
+
+png("MI_integrated_UMAP_by_group.png", res = 300, width = 1800, height = 1800)
+DimPlot(MI_integrated, group.by = "group", pt.size = 1.5, cols = col.touse) + NoLegend()
+p <- DimPlot(MI_integrated, group.by = "group", pt.size = 1, cols = col.touse) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+```
+</div>
+
+### Step 7: FindNeighbours and FindClusters
+
+<div class = "teal">
+    ```{r clustering_and_GO, message = FALSE, warning = FALSE}
+MI_integrated <- FindNeighbors(MI_integrated, dims = 1:50)
+# to determine the resolution of the clustering process
+    
+for (i in 1:20) {
+    MI_integrated <- FindClusters(MI_integrated, resolution = 0.1*i)
+}
+    
+png("MI_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(MI_integrated) # cluster tree visualisation
+dev.off()
+
+png("MI_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(MI_integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.8 is a good choice and change the clusters to the res 0.8 one
+MI_integrated@meta.data$seurat_clusters <- MI_integrated@meta.data$integrated_snn_res.0.8
+MI_integrated <- FindClusters(MI_integrated, resolution = 0.8)
+saveRDS(MI_integrated, file = "MI_integrated.rds")
+
+png("clustering_MI_integrated.png", res = 300, width = 1800, height = 1800)
+DimPlot(MI_integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(MI_integrated, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Find cluster markers using the clustering information in this assay using roc method
+MI_integrated_markers <- FindAllMarkers(MI_integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, test.use = "roc")
+MI_integrated_markers_top10 <- MI_integrated_markers %>% group_by(cluster) %>% top_n(n = 10, wt = myAUC) # I like the AUC method better
+# ATTENTION: not all markers have a P < 0.05. Choose carefully.
+write.csv(MI_integrated_markers, file = "MI_integrated_cluster_markers.csv")
+write.csv(MI_integrated_markers_top10, file = "MI_integrated_cluster_marker_top10.csv")
+
+# Use topGO to annotate the cluster markers 
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## remember the test is based on integrated data rather than the raw counts, thus a lot of parameters need to be reset. I first tried to set the threshold to median of expression levels across different cells, it didn't yield any results. Then I tried to set the threshold to lower quantile using type 7 in r and this didn't yield any results either as the threshold is too high. Then I tried to set the threshold to 10%, still doesn't yield any results. I thing uisng the raw counts might be the best way. 
+length <- length(unique(MI_integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(MI_integrated, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > background expression level in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)] # ncol(expr) is total cell number
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("MI_integrated_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:5, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("MI_integrated_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Integrated Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+}
+
+# I've checked markers for neutrophils, fibroblasts and lymphocytes and it turns out that the dataset is already rid of them. There are two CD45(Ptprc) positive clusters, cluster 12 and 16 and just need to remove these two. 
+```
+</div>
+
+### Step 8: further filtering
+
+<div class = "teal">
+```{r message = F}
+clean_MI_integrated <- subset(MI_integrated, idents = c("12", "16"), invert = TRUE)
+saveRDS(clean_MI_integrated, file = "clean_MI_integrated.rds")
+# re-clustering
+clean_MI_integrated <- RunPCA(clean_MI_integrated, verbose = FALSE)
+set.seed(1024)
+clean_MI_integrated <- RunUMAP(clean_MI_integrated, dims = 1:50)
+saveRDS(clean_MI_integrated, file = "clean_MI_integrated.rds")
+# why not look at some markers first
+# FeaturePlot(clean_MI_integrated, features = c("Vegfc", "Cd74", "Mki67", "Plvap"), cols = viridis::viridis(24), pt.size = 1, combine = T, shape.by = "group")
+
+# plots
+png("clean_MI_integrated_UMAP_by_AccessionNo_nolegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(clean_MI_integrated, group.by = "AccessionNo", pt.size = 1.5, cols = c("#FADFE2", "#DECBE3", "#5D6E9E")) + NoLegend()
+p <- DimPlot(clean_MI_integrated, group.by = "AccessionNo", pt.size = 1, cols = c("#FADFE2", "#DECBE3", "#5D6E9E")) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+png("clean_MI_integrated_UMAP_by_group_withlegend.png", res = 300, width = 1800, height = 1800)
+DimPlot(clean_MI_integrated, group.by = "group", pt.size = 1.5, cols = col.touse)
+dev.off()
+
+png("clean_MI_integrated_UMAP_by_group.png", res = 300, width = 1800, height = 1800)
+DimPlot(clean_MI_integrated, group.by = "group", pt.size = 1.5, cols = col.touse) + NoLegend()
+p <- DimPlot(clean_MI_integrated, group.by = "group", pt.size = 1, cols = col.touse) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+png("clean_MI_integrated_UMAP_by_group_split.png", res = 300, width = 9000, height = 1800)
+DimPlot(clean_MI_integrated, group.by = "ident", pt.size = 1.5, split.by = "group") + NoLegend()
+p <- DimPlot(clean_MI_integrated, group.by = "ident", pt.size = 1, split.by = "group") + NoLegend()
+ggplotly(p, width = 2000, height = 500)
+dev.off()
+
+# Find neigbours again
+clean_MI_integrated <- FindNeighbors(clean_MI_integrated, dims = 1:30)
+
+# to determine the resolution of the clustering process
+for (i in 1:20) {
+    clean_MI_integrated <- FindClusters(clean_MI_integrated, resolution = 0.1*i)
+}
+
+png("clean_MI_integrated_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(clean_MI_integrated) # cluster tree visualisation
+dev.off()
+png("clean_MI_integrated_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(clean_MI_integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.6 is a good choice and change the clusters to the res 0.6 one
+clean_MI_integrated@meta.data$seurat_clusters <- clean_MI_integrated@meta.data$integrated_snn_res.0.6
+clean_MI_integrated <- FindClusters(clean_MI_integrated, resolution = 0.6) # run it again
+
+png("clustering_clean_MI_integrated.png", res = 300, width = 1800, height = 1800)
+DimPlot(clean_MI_integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(clean_MI_integrated, label = TRUE, label.size = 6, pt.size = 1) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# save the object
+saveRDS(clean_MI_integrated, file = "clean_MI_integrated.rds")
+
+# Find cluster markers using the clustering information in this assay and also the top makers will be used to generate violin plot for each cluster
+clean_MI_integrated_markers <- FindAllMarkers(clean_MI_integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.csv(clean_MI_integrated_markers, file = "clean_MI_integrated_markers.csv")
+# a lot of markers identified, so change the threshold to 1.5 to tighten things up
+clean_MI_integrated_markers_tight <- FindAllMarkers(clean_MI_integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 1.5)
+write.csv(clean_MI_integrated_markers_tight, file = "clean_MI_integrated_markers_tight.csv")
+
+clean_MI_integrated_markers_tight_bd <- FindAllMarkers(clean_MI_integrated, only.pos = F, min.pct = 0.25, logfc.threshold = 1.5)
+write.csv(clean_MI_integrated_markers_tight_bd, file = "clean_MI_integrated_markers_tight_bothdirection.csv")
+
+clean_MI_integrated_markers_top10 <- clean_MI_integrated_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(clean_MI_integrated_markers_top10, file = "clean_MI_integrated_markers_top10 .csv")
+
+# plot the top10 markers
+DoHeatmap(clean_MI_integrated, features = clean_MI_integrated_markers_top10$gene) + NoLegend() + scale_fill_viridis()
+
+# Also, a new round of GO analysis 
+length <- length(unique(clean_MI_integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(clean_MI_integrated, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("clean_MI_integrated_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("clean_MI_integrated_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 3000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+} 
+saveRDS(clean_MI_integrated, file = "clean_MI_integrated.rds")
+```
+</div>
+
+### Step 9: Analyse the percentage of each cluster in each age group
+
+<div class = "teal">
+```{r cluster_constitution, message = FALSE, warning = FALSE, cache = FALSE}
+# select the feature to analyse
+meta_to_use <- clean_MI_integrated@meta.data[, c("group", "nCount_SCT", "nFeature_SCT", "seurat_clusters")]
+# summarise the parameters
+summary <- meta_to_use %>% group_by(group, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(group) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(group == "Healthy 7D" ~ n/group_number[1, 2]*100, group == "Sham 7D" ~ n/group_number[2, 2]*100, group == "MI 3D" ~ n/group_number[3, 2]*100, group == "MI 7D" ~ n/group_number[4, 2]*100, group == "Sham 2W" ~ n/group_number[5, 2]*100, group == "MI 2W" ~ n/group_number[6, 2]*100))
+
+# actual population graph
+png("clean_MI_integrated_cluster_population_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+png("clean_MI_integrated_cluster_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100, seurat_clusters == "10" ~ percentage/summary1[11, 2]*100, seurat_clusters == "11" ~ percentage/summary1[12, 2]*100, seurat_clusters == "12" ~ percentage/summary1[13, 2]*100, seurat_clusters == "13" ~ percentage/summary1[14, 2]*100))
+
+# unnormalised percentage graph
+# ggplot() + geom_bar(aes(y = percentage_norm, x = seurat_clusters, fill = Age), data = summary, stat="identity")
+
+# order the data using Healthy data
+Healthy_data <- summary %>% filter (group == "Healthy 7D")
+Healthy_table <- Healthy_data[, c(2, 5)]
+cluster_levels <- Healthy_table[order(Healthy_table$percentage_norm), ]$seurat_clusters
+summary$seurat_clusters <- factor(summary$seurat_clusters,levels = cluster_levels)
+
+# normalised percentage graph
+png("clean_MI_integrated_cluster_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# Calculate the dominant group
+summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 30 ~ "Y", percentage_norm < 30 ~ "N"))
+write.csv(summary, file = "summary_percentage_dominant.csv")
+
+# useful tibble code
+clean_MI_integrated@meta.data %>% group_by(group) %>% summarise(n())
+clean_MI_integrated@meta.data %>% group_by(group) %>% summarise(mean(nCount_SCT))
+clean_MI_integrated@meta.data %>% group_by(group) %>% summarise(mean(nFeature_SCT))
+
+# MI 7D dominant in cluster 7 and 11
+# Top10 markers to use
+# cluster 7 all markers
+cluster7.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "7", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster7.features, pt.size = 0)
+# cluster 7 specific
+cluster7.features.specific <- c("Cdk1", "Cks2", "Top2a", "Birc5", "Ccnb2", "Nav2", "Mki67", "Tpx2")
+# produce single plots so I can manipulate the layout
+for (i in cluster7.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# cluster 11 all markers
+cluster11.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "11", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster11.features, pt.size = 0)
+# cluster 11 specific
+cluster11.features.specific <- c("Tmsb10", "Fscn1", "Apln", "Sparc")
+# produce single plots so I can manipulate the layout
+for (i in cluster11.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# MI 2W dominant in cluster 8 and 12
+# Top10 markers to use
+# cluster 8 all markers
+cluster8.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "8", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster8.features, pt.size = 0)
+# cluster 8 specific
+cluster8.features.specific <- c("Cpe", "Ctsh")
+# produce single plots so I can manipulate the layout
+for (i in cluster8.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# cluster 12 all markers
+cluster12.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "12", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster12.features, pt.size = 0)
+# cluster 12 specific
+cluster12.features.specific <- c("Col3a1", "Lrp1", "Gpx3")
+# produce single plots so I can manipulate the layout
+for (i in cluster12.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# Healthy 7D dominant in cluster 9 and 10
+# Top10 markers to use
+# cluster 9 all markers
+cluster9.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "9", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster9.features, pt.size = 0)
+# cluster 9 specific
+cluster9.features.specific <- c("Actb")
+# produce single plots so I can manipulate the layout
+for (i in cluster9.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# cluster 10 all markers
+cluster10.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "10", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster10.features, pt.size = 0)
+# cluster 10 specific
+cluster10.features.specific <- c("Iigp1")
+# produce single plots so I can manipulate the layout
+for (i in cluster10.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# Sham 2W dominant in cluster 13
+# Top10 markers to use
+# cluster 13 all markers
+cluster13.features <- clean_MI_integrated_markers_top10[clean_MI_integrated_markers_top10$cluster == "13", ]$gene
+VlnPlot(clean_MI_integrated, features = cluster13.features, pt.size = 0)
+# cluster 13 specific
+cluster13.features.specific <- c("Tpm2", "Acta2")
+# produce single plots so I can manipulate the layout
+for (i in cluster13.features.specific) {
+    png(paste0("clean_MI_integrated_vlnplot_", i, ".png"), res = 600, width = 4000, height = 1000)
+    print(VlnPlot(clean_MI_integrated, features = i, pt.size = 0, ncol = 1, y.max = 20) + theme_classic() + theme(axis.title.x = element_blank(), axis.title.y = element_blank(), plot.title = element_text(hjust = 0.5), legend.position = "none"))
+    dev.off()
+}
+
+# get the colour information
+p <- DimPlot(clean_MI_integrated)
+q <- ggplot_build(p)
+r <- q$data[[1]]
+s <- r %>% group_by(group) %>% summarise(colour)
+unique(s$colour)
+
+# If you running into any problems saying that Error in if (size == Inf) { : missing value where TRUE/FALSE needed. Reinstall the two libraries. 
+devtools::install_github(repo = 'mojaveazure/loomR', ref = 'develop', force = TRUE)
+devtools::install_github(repo = 'hhoeflin/hdf5r', force = TRUE)
+library(loomR)
+library(hdf5r)
+library(Seurat)
+# add colour information to meta.data
+clean_MI_integrated@meta.data <- clean_MI_integrated@meta.data %>% mutate(colour = case_when(seurat_clusters == "0" ~ "#F8766D", seurat_clusters == "1" ~ "#E38900", seurat_clusters == "2" ~ "#C49A00", seurat_clusters == "3" ~ "#99A800", seurat_clusters == "4" ~ "#53B400", seurat_clusters == "5" ~ "#00BC56", seurat_clusters == "6" ~ "#00C094", seurat_clusters == "7" ~ "#00BFC4", seurat_clusters == "8" ~ "#00B6EB", seurat_clusters == "9" ~ "#06A4FF", seurat_clusters == "10" ~ "#A58AFF", seurat_clusters == "11" ~ "#DF70F8", seurat_clusters == "12" ~ "#FB61D7", seurat_clusters == "13" ~ "#FF66A8"))
+
+# save the loom file for plotting in Scanpy
+# This step quite easily gets stuck. Just shut down everything and reinstall the libraries. And as always, try again.
+clean.loom <- as.loom(clean_MI_integrated, filename = "clean.loom", verbose = TRUE, overwrite = TRUE)
+clean.loom$close_all()
+```
+</div>
+
+### Step 10: DE analysis for whole dataset
+method 1: Seurat DE
+method 2: scDD (pending)
+method 3: scrat (only for proliferative cells)
+
+<div class = "teal">
+```{r}
+## method 1: Seurat DE
+# Change default ident to group (Healthy 7D, Sham 7D, Sham 2W, MI 3D, MI 7D, MI 2W)
+Idents(clean_MI_integrated) <- "group"
+
+# Healthy 7D vs MI 3D
+Healthy_3D_DE <- FindMarkers(clean_MI_integrated, ident.1 = "Healthy 7D", ident.2 = "MI 3D", logfc.threshold = 3, min.pct = 0.5, min.diff.pct = 0.5, only.pos = FALSE)
+write.csv(Healthy_3D_DE, "Healthy_3D_MI_DE.csv")
+# Biotyping the markers using ensembldb package
+db <- EnsDb.Mmusculus.v79
+txs <- transcripts(db, filter = GeneNameFilter(rownames(Healthy_3D_DE)), columns = c("tx_biotype"))
+txs.info <- distinct(as.data.frame(cbind(as.data.frame(txs@seqnames), txs$gene_name, txs$tx_biotype)))
+colnames(txs.info) <- c("chromosome", "gene", "biotype")
+write.csv(txs.info, "Healthy_3D_MI_DE_biotype.csv")
+
+# MI 3D vs MI 7D
+# HAD TO LOWER THE min.diff.pct to 0.2 to get genes to pass the threshold
+MI_3D_7D_DE <- FindMarkers(clean_MI_integrated, ident.1 = "MI 3D", ident.2 = "MI 7D", logfc.threshold = 3, min.pct = 0.5, min.diff.pct = 0.2, only.pos = FALSE)
+write.csv(MI_3D_7D_DE, "MI_3D_7D_DE.csv")
+# biotyping
+txs <- transcripts(db, filter = GeneNameFilter(rownames(MI_3D_7D_DE)), columns = c("tx_biotype"))
+txs.info <- distinct(as.data.frame(cbind(as.data.frame(txs@seqnames), txs$gene_name, txs$tx_biotype)))
+colnames(txs.info) <- c("chromosome", "gene", "biotype")
+write.csv(txs.info, "MI_3D_7D_DE_biotype.csv")
+
+# MI 7D vs MI 2W
+# HAD TO LOWER THE min.diff.pct to 0.3 to get genes to pass the threshold
+MI_7D_2W_DE <- FindMarkers(clean_MI_integrated, ident.1 = "MI 7D", ident.2 = "MI 2W", logfc.threshold = 3, min.pct = 0.5, min.diff.pct = 0.3, only.pos = FALSE)
+write.csv(MI_7D_2W_DE, "MI_7D_2W_DE.csv")
+# biotyping
+txs <- transcripts(db, filter = GeneNameFilter(rownames(MI_7D_2W_DE)), columns = c("tx_biotype"))
+txs.info <- distinct(as.data.frame(cbind(as.data.frame(txs@seqnames), txs$gene_name, txs$tx_biotype)))
+colnames(txs.info) <- c("chromosome", "gene", "biotype")
+write.csv(txs.info, "MI_7D_2W_DE_biotype.csv")
+
+# Common DEG between healthy and 3D and 7D and 2W
+intersect(rownames(Healthy_3D_DE), rownames(MI_3D_7D_DE))
+# "Me1"      "Plvap"
+intersect(rownames(MI_3D_7D_DE), rownames(MI_7D_2W_DE))
+# character(0)
+FeaturePlot(clean_MI_integrated, features = c("Me1", "Plvap"), split.by = "group", cols = viridis::viridis(10))
+## for this section, if remove the condition on min.diff.pct and lower the logfc.threshold to 2, then I get more genes
+a <- intersect(rownames(Healthy_3D_DE), rownames(MI_3D_7D_DE))
+b <- intersect(rownames(MI_3D_7D_DE), rownames(MI_7D_2W_DE))
+intersect (a, b)
+# "Ctsf" "Tmem176b" "Ncoa6" "Pycard" "Nxpe2" "Fxyd6" "Emp3" "Vim" "Plvap" "Tmsb10"
+```
+</div>
+
+### Step 11: Proliferative cluster analysis
+method 1: Seurat DE
+method 2: scDD 
+method 3: scrat 
+
+<div class = "teal">
+```{r}
+## Extract proliferative cluster cells
+# plf - proliferative
+plf <- subset(clean_MI_integrated, idents = c("7"), invert = FALSE)
+saveRDS(plf, file = "proliferate_integrated.rds")
+
+# these are all proliferative cells so removing the cell cycle marker is quite good
+s.genes <- human2mouse(cc.genes$s.genes) # return a dataframe
+g2m.genes <- human2mouse(cc.genes$g2m.genes) # return a dataframe
+plf <- CellCycleScoring(plf, s.features = s.genes$mouseGene, g2m.features = g2m.genes$mouseGene, set.ident = TRUE)
+plf <- SCTransform(plf, vars.to.regress = c( "S.Score", "G2M.Score"))
+
+# re-clustering
+plf <- RunPCA(plf, verbose = FALSE)
+set.seed(1024)
+plf <- RunUMAP(plf, dims = 1:50)
+saveRDS(plf, file = "proliferate_integrated.rds")
+
+# find neighbours
+plf <- FindNeighbors(plf, dims = 1:30)
+for (i in 1:20) {
+        plf <- FindClusters(plf, resolution = 0.1*i)
+}
+
+png("proliferative_integrated_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(plf) # cluster tree visualisation
+dev.off()
+
+png("proliferative_integrated_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(plf, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# resolution 2 is a good choice
+plf@meta.data$seurat_clusters <- plf@meta.data$SCT_snn_res.2
+plf <- FindClusters(plf, resolution = 2) # run it again
+saveRDS(plf, file = "proliferate_integrated.rds")
+
+# plot clustering
+## colour
+col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+## Dimplot
+png("proliferate_integrated_cluster.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+## Dimplot by group
+png("proliferate_integrated_cluster_group.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = FALSE, group.by = "group", cols = col.touse)
+p <- DimPlot(plf, label = FALSE, group.by = "group", cols = col.touse) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+## Use plotly graphics
+# need to make a new dataframe for this
+df_plf <- cbind(plf@reductions$umap@cell.embeddings, plf@meta.data[, c(1:10, 31, 32, 33, 55)])
+fig <- plot_ly(data = df_plf, x = ~ UMAP_1, y = ~ UMAP_2, type = 'scatter', mode = 'markers', color = ~ group, colors = col.touse, marker = list(size = 16, line = list(color = "black", width = 1))) %>% layout(legend = list(x = 0.7, y = 0.1), autosize = F, width = 500, height = 500, font = list(size = 20, family = "Open Sans"), xaxis = list(zeroline = FALSE), yaxis = list(zeroline = FALSE))
+fig
+write.csv(df_plf, "proliferate_integrated_dimplot_metadata.csv")
+
+# Find cluster markers using the clustering information in this assay
+plf_markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5)
+write.csv(plf_markers, file = "proliferate_integrated_marker.csv")
+
+#######################
+# save as loom file for other functions
+plf_loom <- as.loom(plf, file = "proliferate_integrated.loom")
+plf_loom$close_all()
+#######################
+
+## method 1: Seurat DE (plus scanpy plotting)
+
+## method 2: scDD
+
+## method 3: scrat
+# THIS PROCESS EATS A LOT OF COMPUTING POWER
+# ONLY USE THIS ON THE PROLIFERATING CELLS
+# col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+df1 <- as.data.frame(t(as.matrix(plf@assays$SCT@scale.data)))
+
+plf@meta.data <- plf@meta.data %>% mutate(color = case_when(group == "Healthy 7D" ~ "#88CCEE", group == "Sham 7D" ~ "#117733", group == "MI 3D" ~ "#332288", group == "MI 7D" ~ "#CC6677", group == "Sham 2W" ~ "#882255", group == "MI 2W" ~ "#AA4499"), newgroup = case_when(group == "Healthy 7D" ~ "Healthy_7D", group == "Sham 7D" ~ "Sham_7D", group == "MI 3D" ~ "MI_3D", group == "MI 7D" ~ "MI_7D", group == "Sham 2W" ~ "Sham_2W", group == "MI 2W" ~ "MI_2W"))
+
+df2 <- data.frame(cell_id = rownames(df1), experiment = "Healthy_Sham_MI_Mouse_plf_Meta", assignment_LB = plf@meta.data$newgroup, color = plf@meta.data$color, row.names = rownames(df1))
+
+dfFinal <- cbind(df2, df1)
+dfFinal[1:5, 1:5] # check the input is ready
+
+# Assign groups and colors
+SOM.assign <- as.character(dfFinal$assignment_LB)
+SOM.color <- as.character(dfFinal$color)
+
+dfFinal <- t(dfFinal) 
+# Set up the environment
+env <- scrat.new(list(dataset.name = "exciting",
+                      dim.1stLvlSom = 50,
+                      dim.2ndLvlSom = 20,
+                      training.extension = 1,
+                      rotate.SOM.portraits = 0,
+                      flip.SOM.portraits = F,
+                      database.dataset = "mmusculus_gene_ensembl",
+                      database.id.type = "mgi_symbol",
+                      geneset.analysis = T,
+                      geneset.analysis.exact = F,
+                      spot.coresize.modules = 3,
+                      spot.threshold.modules = 0.95,
+                      spot.coresize.groupmap = 5,
+                      spot.threshold.groupmap = 0.75,
+                      pseudotime.estimation = list(
+                              n.waypoints = 20,
+                              n.iterations = 20,
+                              k = 30,
+                              I = 5,
+                              initiator.sample = "Healthy_7D"),
+                      feature.centralization = T,
+                      sample.quantile.normalization = T,
+                      pairwise.comparison.list = list()))
+# env setup nicely done
+# Load input datainto environment
+env$indata <- dfFinal # check
+# Define sample groups
+env$group.labels <- SOM.assign
+#env$group.labels <-"auto"
+# Define sample colors(optional)
+env$group.colors <- SOM.color # check
+#env$group.colors<-c("col1","col2",...)[match(env$group.labels, unique(env$group.labels))
+# Pipeline execution
+scrat.run(env) # for HTTP error just load the Biomart library
+# nicely done
+
+### Plot the number of cells in each age group included in the scrat analysis
+number <- df2 %>% group_by(assignment_LB) %>% tally()
+colnames(number) <- c("group", "cell_number")
+levels(number$group) <- c("Healthy 7D", "Sham 7D", "MI 3D", "MI 7D", "Sham 2W", "MI 2W")
+
+png("plf_scrat_analysis_cellnumber.png", res = 300, width = 3000, height = 3000)
+ggplot(data = number, aes(x = group, y = cell_number)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "group", y = "Cell Number in Cluster 7") + theme(legend.position = c(0.85, 0.92), legend.key.size = unit(1.5,"line"), legend.text = element_text(family = "Open Sans", size = 22), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(family = "Open Sans", size = 22, colour = "black"), axis.text.y = element_text(family = "Open Sans", size = 22, colour = "black"), axis.title.x = element_text(family = "Open Sans", size = 22), axis.title.y = element_text(family = "Open Sans", size = 24), axis.ticks.length = unit(0.4,"cm")) + geom_text(family = "Open Sans", aes(label = cell_number), vjust = -0.2, color = "black", size = 12)
+dev.off()
+
+```
+</div>
+
+### Step 12: Analysis of cells from cluster 7, 11 and 1
+
+### Step 13: functional studies
+
+<div class = "teal">
+```{r}
+### Top-50 marker genes of pooled traditional EC subtypes heart from Peter Carmeliet's Cell paper "Single-Cell Transcriptome Atlas of Murine Endothelial cells"
+marker.file <- read.csv("PC_Cell_Paper_markers.csv", header = TRUE)
+artery.marker <- marker.file$artery
+capillary.marker <- marker.file$capillary
+vein.marker <- marker.file$vein
+### use AUCell to calculate the signatures
+```
+</div>
