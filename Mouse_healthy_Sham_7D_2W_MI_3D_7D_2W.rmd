@@ -243,7 +243,7 @@ dev.off()
 
 # 10 colours
 # col.touse <- c('#88CCEE', '#44AA99', '#117733', '#332288', '#DDCC77', '#999933','#CC6677', '#882255', '#AA4499', '#DDDDDD')
-# 5 colours
+# 6 colours
 col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
 
 png("MI_integrated_UMAP_by_group.png", res = 300, width = 1800, height = 1800)
@@ -514,7 +514,7 @@ ggplotly(p, width = 800, height = 800)
 dev.off()
 
 # Calculate the dominant group
-summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 30 ~ "Y", percentage_norm < 30 ~ "N"))
+summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 20 ~ "Y", percentage_norm < 20 ~ "N"))
 write.csv(summary, file = "summary_percentage_dominant.csv")
 
 # useful tibble code
@@ -755,6 +755,17 @@ dev.off()
 df_plf <- cbind(plf@reductions$umap@cell.embeddings, plf@meta.data[, c(1:10, 31, 32, 33, 55)])
 fig <- plot_ly(data = df_plf, x = ~ UMAP_1, y = ~ UMAP_2, type = 'scatter', mode = 'markers', color = ~ group, colors = col.touse, marker = list(size = 16, line = list(color = "black", width = 1))) %>% layout(legend = list(x = 0.7, y = 0.1), autosize = F, width = 500, height = 500, font = list(size = 20, family = "Open Sans"), xaxis = list(zeroline = FALSE), yaxis = list(zeroline = FALSE))
 fig
+
+col.touse1 <- c("#F8766D", "#D89000", "#A3A500", "#39B600", "#00BF7D", "#00BFC4", "#00B0F6", "#9590FF", "#E76BF3", "#FF62BC")
+# alternatively, the colours can be extracted in the way below
+# p <- DimPlot(plf, label = TRUE, label.size = 6)
+# x <- ggplot_build(p)[[1]][[1]]
+# y <- x[, c(1, 5)]
+# z <- dplyr::distinct(y)
+# z <- z[order(z$group), ]
+# col.touse1 <- z$colour
+fig1 <- plot_ly(data = df_plf, x = ~ UMAP_1, y = ~ UMAP_2, type = 'scatter', mode = 'markers', color = ~ seurat_clusters, colors = col.touse1, marker = list(size = 16, line = list(color = "black", width = 1))) %>% layout(legend = list(x = 0.7, y = 0.1), autosize = F, width = 500, height = 500, font = list(size = 20, family = "Open Sans"), xaxis = list(zeroline = FALSE), yaxis = list(zeroline = FALSE))
+fig1
 write.csv(df_plf, "proliferate_integrated_dimplot_metadata.csv")
 
 # Find cluster markers using the clustering information in this assay
@@ -838,9 +849,147 @@ dev.off()
 ```
 </div>
 
-### Step 12: Analysis of cells from cluster 7, 11 and 1
+### Step 12: GO analysis of proliferative subclusters
+<div class = "teal">
+```{r}
+# Also, a new round of GO analysis 
+length <- length(unique(plf@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(plf, idents = as.character(i))
+    expr <- cluster@assays$SCT@data
+    # Select genes that are expressed > 0 in at least 60% of cells 
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.60)]
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 80)
+    # Save GO table
+    write.csv(GO_table, file = paste0("proliferative_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("proliferative_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 3000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+} 
 
-### Step 13: functional studies
+# Find cluster markers using the clustering information in this assay and also the top makers will be used to generate violin plot for each cluster
+proliferative_markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.csv(proliferative_markers, file = "proliferative_markers.csv")
+
+# a lot of markers identified, so change the threshold to 1.5 to tighten things up
+proliferative_markers_tight <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 1.5)
+write.csv(proliferative_markers_tight, file = "proliferative_markers_tight.csv")
+
+proliferative_markers_top10 <- proliferative_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(proliferative_markers_top10, file = "proliferative_markers_top10 .csv")
+```
+</div>
+
+### Step 13: Analyse the percentage of each proliferative subcluster in each group
+
+<div class = "teal">
+```{r cluster_constitution, message = FALSE, warning = FALSE, cache = FALSE}
+# select the feature to analyse
+meta_to_use <- plf@meta.data[, c("group", "nCount_SCT", "nFeature_SCT", "seurat_clusters")]
+# summarise the parameters
+summary <- meta_to_use %>% group_by(group, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(group) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(group == "Healthy 7D" ~ n/group_number[1, 2]*100, group == "Sham 7D" ~ n/group_number[2, 2]*100, group == "MI 3D" ~ n/group_number[3, 2]*100, group == "MI 7D" ~ n/group_number[4, 2]*100, group == "Sham 2W" ~ n/group_number[5, 2]*100, group == "MI 2W" ~ n/group_number[6, 2]*100))
+
+# actual population graph
+png("proliferative_population_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+####################################################################
+### useful piece of code for filling up the missing data with 0s ###
+####################################################################
+# build the first column with the right number of rows
+group <- c(rep("Healthy 7D", 10), rep("Sham 7D", 10), rep("MI 3D", 10), rep("MI 7D", 10), rep("Sham 2W", 10), rep("MI 2W", 10))
+# build into a data frame
+new.df <- as.data.frame(group)
+# populate the cluster column
+new.df$seurat_clusters <- c(0:9)
+# populate the cell number column 0
+new.df$n <- 0
+# populate the percentage column 0
+new.df$percentage <- 0
+# merge the new data frame with the summary data frame with missing rows based on the group and seurat_cluster columns
+agg.df <- merge(new.df, summary, c("group", "seurat_clusters"),all.x = TRUE)
+# populate the cell number and percentage columns with numbers from the summary data frame if available, otherwise remains 0
+agg.df$n <- ifelse(is.na(agg.df$n.y), 0, agg.df$n.y)
+agg.df$percentage <- ifelse(is.na(agg.df$percentage.y), 0, agg.df$percentage.y)
+# only choose the useful columns from the merged data frame
+final <- agg.df[, names(new.df)]
+head(final)
+
+group_levels <- c("Healthy 7D", "Sham 7D", "MI 3D", "MI 7D", "Sham 2W", "MI 2W")
+final$group <- factor(final$group,levels = group_levels)
+####################################################################
+
+# use the final data frame for this part 
+png("proliferative_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = as.factor(seurat_clusters), y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = final, aes(x = as.factor(seurat_clusters), y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# normalise percentage data
+summary1 <- as.data.frame(final %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+
+final <- final %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100))
+
+# order the data using Healthy data
+Healthy_data <- final %>% dplyr::filter (group == "Healthy 7D")
+Healthy_table <- Healthy_data[, c(2, 5)]
+cluster_levels <- Healthy_table[order(Healthy_table$percentage_norm), ]$seurat_clusters
+final$seurat_clusters <- factor(final$seurat_clusters,levels = cluster_levels)
+
+# normalised percentage graph
+png("proliferative_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = as.factor(seurat_clusters), y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = final, aes(x = as.factor(seurat_clusters), y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# Calculate the dominant group
+final <- final %>% mutate (dominant = case_when(percentage_norm >= 20 ~ "Y", percentage_norm < 20 ~ "N"))
+write.csv(final, file = "proliferative_summary_percentage_dominant.csv")
+```
+</div>
+
+### Step 14: Analysis of cells from cluster 7, 11 and 1
+
+### Step 15: functional studies of Cdks
+
+### Step 16: functional studies of tip/stalk markers
+
+### Step 17: functional studies of arterial/venous responses
 
 <div class = "teal">
 ```{r}
@@ -849,6 +998,126 @@ marker.file <- read.csv("PC_Cell_Paper_markers.csv", header = TRUE)
 artery.marker <- marker.file$artery
 capillary.marker <- marker.file$capillary
 vein.marker <- marker.file$vein
-### use AUCell to calculate the signatures
+
+# read in whole data as plf, DON'T OVERWRITE!!!!
+
+# My feelings is that vevous responses precedes arterial responses in the event of MI and I hope to find some evidence either in all ECs or in proliferative ECs. The method used here is the AUCell.
+# Load count data
+exprMatrix <- plf@assays$integrated@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+
+# Set gene set
+artery.geneSets <- GeneSet(as.character(artery.marker), setName = "Arterial_proliferative_ECs")
+artery.geneSets
+
+capillary.geneSets <- GeneSet(as.character(capillary.marker), setName = "Capillary_proliferative_ECs")
+capillary.geneSets
+
+vein.geneSets <- GeneSet(as.character(vein.marker), setName = "Venous_proliferative_ECs")
+vein.geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "Plf_EC_rankings.RData")
+
+# Calculate enrichment for the gene signatures (AUC)
+A.cells_AUC <- AUCell_calcAUC(artery.geneSets, cells_rankings)
+C.cells_AUC <- AUCell_calcAUC(capillary.geneSets, cells_rankings)
+V.cells_AUC <- AUCell_calcAUC(vein.geneSets, cells_rankings)
+
+# add AUC score to the MI object
+plf@meta.data$artery_AUC_score <- t(getAUC(A.cells_AUC))
+save(A.cells_AUC, file = "artery_EC_AUC.RData")
+
+plf@meta.data$capillary_AUC_score <- t(getAUC(C.cells_AUC))
+save(C.cells_AUC, file = "capillary_EC_AUC.RData")
+
+plf@meta.data$vein_AUC_score <- t(getAUC(V.cells_AUC))
+save(V.cells_AUC, file = "vein_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+A.cells_assignment <- AUCell_exploreThresholds(A.cells_AUC, plotHist = TRUE, assign = TRUE)
+A.cells_assignment$Arterial_proliferative_ECs$aucThr$thresholds # 0.2 seems a good threshold
+
+C.cells_assignment <- AUCell_exploreThresholds(C.cells_AUC, plotHist = TRUE, assign = TRUE)
+C.cells_assignment$Capillary_proliferative_ECs$aucThr$thresholds # L_k2 seems a good threshold [3, 1]
+
+V.cells_assignment <- AUCell_exploreThresholds(V.cells_AUC, plotHist = TRUE, assign = TRUE)
+V.cells_assignment$Venous_proliferative_ECs$aucThr$thresholds # L_k2 seems a good threshold [3, 1]
+
+# AUCscore as ridge plot
+col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+
+RidgePlot(plf, features = c("artery_AUC_score", "capillary_AUC_score", "vein_AUC_score"), same.y.lims = TRUE, group.by = "group", cols = col.touse)
+
+# AUCscore as feature plot
+pa <- FeaturePlot(plf, features = c("artery_AUC_score"), cols = viridis::viridis(21), split.by = "group", pt.size = 2) + NoLegend()
+
+pc <- FeaturePlot(plf, features = c("capillary_AUC_score"), cols = viridis::inferno(21), split.by = "group", pt.size = 2) + NoLegend()
+
+pv <- FeaturePlot(plf, features = c("vein_AUC_score"), cols = viridis::cividis(21), split.by = "group", pt.size = 2) + NoLegend()
+
+FeaturePlot(plf, features = c("artery_AUC_score", "capillary_AUC_score"), split.by = "group", blend = TRUE, cols = c("white", "blue", "red")) & NoLegend() & NoAxes()
+
+# The feature plots doesn't really show the difference between groups that well so replot in plotly
+col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+# extract useful columns
+score <- plf@meta.data[, c(1:8, 55:58)]
+# score <- plf@meta.data[, c(1:8, 12, 32:34)] # for the whole dataset
+# use 'download as png' to save
+plot_ly(score, y = ~ artery_AUC_score, color = ~ group, type = "box", colors = col.touse, width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Group", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Artery_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(score, y = ~ capillary_AUC_score, color = ~ group, type = "box", colors = col.touse, width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Group", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Capillary_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+plot_ly(score, y = ~ vein_AUC_score, color = ~ group, type = "box", colors = col.touse, width = 500, height = 500) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Group", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Venous_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+
+## Density plots works the best so far
+MI2W <- score[which(score$group == "MI 2W"),]
+MI2WD <- density(MI2W$artery_AUC_score)
+# MI2WD <- density(MI2W$capillary_AUC_score)
+# MI2WD <- density(MI2W$vein_AUC_score)
+
+SH2W <- score[which(score$group == "Sham 2W"),]
+SH2WD <- density(SH2W$artery_AUC_score)
+
+MI7D <- score[which(score$group == "MI 7D"),]
+MI7DD <- density(MI7D$artery_AUC_score)
+# MI7DD <- density(MI7D$capillary_AUC_score)
+# MI7DD <- density(MI7D$vein_AUC_score)
+
+MI3D <- score[which(score$group == "MI 3D"),]
+MI3DD <- density(MI3D$artery_AUC_score)
+# MI3DD <- density(MI3D$capillary_AUC_score)
+# MI3DD <- density(MI3D$vein_AUC_score)
+
+SH7D <- score[which(score$group == "Sham 7D"),]
+SH7DD <- density(SH7D$artery_AUC_score)
+
+H7D <- score[which(score$group == "Healthy 7D"),]
+H7DD <- density(H7D$artery_AUC_score)
+# H7DD <- density(H7D$capillary_AUC_score)
+# H7DD <- density(H7D$vein_AUC_score)
+
+fig <- plot_ly(x = ~ MI2WD$x, y = ~ MI2WD$y, type = 'scatter', mode = 'lines', name = 'MI 2W', fill = 'tozeroy', fillcolor = 'rgba(170, 68, 153, 0.5)', line = list(width = 1, color = 'rgba(170, 68, 153, 1)'), width = 600, height = 200)
+
+# fig <- fig %>% add_trace(x = ~SH2WD$x, y = ~SH2WD$y, name = 'Sham 2W', fill = 'tozeroy', fillcolor = 'rgba(136, 34, 85, 0.5)', line = list(width = 1, color = 'rgba(136, 34, 85, 1)'))
+
+fig <- fig %>% add_trace(x = ~MI7DD$x, y = ~MI7DD$y, name = 'MI 7D', fill = 'tozeroy', fillcolor = 'rgba(204, 102, 119, 0.5)', line = list(width = 1, color = 'rgba(204, 102, 119, 1)'))
+
+fig <- fig %>% add_trace(x = ~MI3DD$x, y = ~MI3DD$y, name = 'MI 3D', fill = 'tozeroy', fillcolor = 'rgba(51, 34, 136, 0.5)', line = list(width = 1, color = 'rgba(51, 34, 136, 1)'))
+
+# fig <- fig %>% add_trace(x = ~SH7DD$x, y = ~SH7DD$y, name = 'Sham 7D', fill = 'tozeroy', fillcolor = 'rgba(17, 119, 51, 0.5)', line = list(width = 1, color = 'rgba(17, 119, 51, 1)'))
+
+fig <- fig %>% add_trace(x = ~H7DD$x, y = ~H7DD$y, name = 'Healthy 7D', fill = 'tozeroy', fillcolor = 'rgba(136, 204, 238, 0.5)', line = list(width = 1, color = 'rgba(136, 204, 238, 1)'))
+
+# fig <- fig %>% layout(xaxis = list(title = 'Venous AUC score'), yaxis = list(title = 'Density'))
+# fig <- fig %>% layout(xaxis = list(title = 'Capillary AUC score'), yaxis = list(title = 'Density'))
+fig <- fig %>% layout(xaxis = list(title = 'Arterial AUC score'), yaxis = list(title = 'Density'))
+
+fig
 ```
 </div>
