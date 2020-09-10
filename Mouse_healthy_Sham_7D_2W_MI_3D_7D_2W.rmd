@@ -41,6 +41,8 @@ library(RcisTarget)
 library(loomR)
 library(ensembldb)
 library(EnsDb.Mmusculus.v79)
+library(dorothea)
+library(viper)
 ```
 </div>
 
@@ -983,13 +985,63 @@ write.csv(final, file = "proliferative_summary_percentage_dominant.csv")
 ```
 </div>
 
-### Step 14: Analysis of cells from cluster 7, 11 and 1
+### Step 14: functional studies of tip/stalk markers
 
-### Step 15: functional studies of Cdks
+<div class = "teal">
+```{r}
+# tip cell markers: Dll4, VEGFR2(KDR), VEGFR3(FLT4), PDGFB, Ang-2, UNC5B, CXCR4, and Nidogen-2 (NID2) (VEGF and Notch in Tip and Stalk Cell Selection, Blanco et al)
+# VEGF signalling: VEGF-A,B,C,D, VEGFR1/2/3, NRP1/2
+# NOTCH signalling: NOTCH1/2/3/4, JAG1/2, Dll1/3/4, HEY1/2
+# Let's start with something simple
+tip.marker <- c("Dll4", "Kdr", "Flt4", "Pdgfb", "Unc5b", "Cxcr4", "Nid2")
+RidgePlot(plf, features = tip.marker, same.y.lims = TRUE, group.by = "group", cols = col.touse)
+vegfc.marker <- c("Vegfc", "Vegfd", "Flt1", "Kdr", "Flt4", "Nrp1", "Nrp2")
+DotPlot(plf, features = vegfc.marker, group.by = "group", cols = c("blue", "orange"))
+# get AUCell score
+# Load count data
+exprMatrix <- plf@assays$integrated@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
 
-### Step 16: functional studies of tip/stalk markers
+# Set gene set
+tip.geneSets <- GeneSet(as.character(tip.marker), setName = "tip_proliferative_ECs")
+tip.geneSets
 
-### Step 17: functional studies of arterial/venous responses
+vegfc.geneSets <- GeneSet(as.character(vegfc.marker), setName = "vegfc_proliferative_ECs")
+vegfc.geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "Plf_EC_rankings.RData")
+
+# Calculate enrichment for the gene signatures (AUC)
+t.cells_AUC <- AUCell_calcAUC(tip.geneSets, cells_rankings)
+v.cells_AUC <- AUCell_calcAUC(vegfc.geneSets, cells_rankings)
+
+# add AUC score to the MI object
+plf@meta.data$tipcell_AUC_score <- t(getAUC(t.cells_AUC))
+save(t.cells_AUC, file = "tip_EC_AUC.RData")
+
+plf@meta.data$vegfccell_AUC_score <- t(getAUC(v.cells_AUC))
+save(v.cells_AUC, file = "vegfc_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+t.cells_assignment <- AUCell_exploreThresholds(t.cells_AUC, plotHist = TRUE, assign = TRUE)
+
+v.cells_assignment <- AUCell_exploreThresholds(v.cells_AUC, plotHist = TRUE, assign = TRUE)
+
+RidgePlot(plf, features = c("tipcell_AUC_score", "vegfccell_AUC_score"), same.y.lims = TRUE, group.by = "group", cols = col.touse)
+
+FeaturePlot(plf, features = c("vegfccell_AUC_score"), split.by = "group", cols = viridis::viridis(30), pt.size = 2)
+## it is not the best way to visualise the change in genes in a signalling pathway as sometimes genes are up and downs, so it's best to show individual genes instead. 
+```
+</div>
+
+
+### Step 15: functional studies of arterial/venous responses
 
 <div class = "teal">
 ```{r}
@@ -1121,3 +1173,143 @@ fig <- fig %>% layout(xaxis = list(title = 'Arterial AUC score'), yaxis = list(t
 fig
 ```
 </div>
+
+### Step 16: Regulon analysis for proliferation cells using packages DoRoThea and VIPER. (DoRoThea has to be run with R 4.0 and I'm currently on 3.6. Run other analysis first and then come back and log into R4.0.) Switch to R4.0 using command.
+
+<div class = "teal">
+```{r}
+# load data
+plf <- readRDS("proliferate_integrated.rds")
+# load library
+library(dorothea)
+library(viper)
+## read Dorothea Regulons for mouse:
+dorothea_regulon_mouse <- get(data("dorothea_mm", package = "dorothea"))
+
+## obtain the regulons based on interactions with confidence level A, B and C
+regulon <- dorothea_regulon_mouse %>% dplyr::filter(confidence %in% c("A","B","C"))
+
+## We compute Viper Scores 
+plf <- run_viper(plf, regulon, options = list(method = "scale", minsize = 4, eset.filter = FALSE, cores = 2, verbose = FALSE))
+
+## We compute the Nearest Neighbours to perform cluster
+DefaultAssay(object = plf) <- "dorothea"
+plf <- ScaleData(plf)
+plf <- RunPCA(plf, features = rownames(plf), verbose = FALSE)
+plf <- FindNeighbors(plf, dims = 1:30, verbose = FALSE)
+
+#########################
+#########################
+# find neighbours
+for (i in 1:20) {
+        plf <- FindClusters(plf, resolution = 0.1*i)
+}
+
+png("dorothea_proliferative_integrated_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(plf) # cluster tree visualisation
+dev.off()
+
+png("dorothea_proliferative_integrated_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(plf, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# resolution 1.5 is a good choice
+plf@meta.data$seurat_clusters <- plf@meta.data$SCT_snn_res.1.5
+plf <- FindClusters(plf, resolution = 1.5) # run it again
+saveRDS(plf, file = "proliferate_integrated.rds")
+#########################
+#########################
+plf <- RunUMAP(plf, dims = 1:30, umap.method = "uwot", metric = "cosine")
+
+plf.markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, verbose = FALSE)
+write.csv(plf.markers, file = "dorothea_tf_cluster_markers.csv")
+
+## plot the new cluster based on TF activities
+# plot clustering
+## colour
+col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+## Dimplot
+## the png function seems having problems with the helvatica font 
+png("dorothea_proliferate_integrated_cluster.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+## Dimplot by group
+png("dorothea_proliferate_integrated_cluster_group.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = FALSE, group.by = "group", cols = col.touse)
+p <- DimPlot(plf, label = FALSE, group.by = "group", cols = col.touse) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+## TF activity per group
+## We transform Viper scores, scaled by seurat, into a data frame to better 
+## handling the results
+viper_scores_df <- GetAssayData(plf, slot = "scale.data", assay = "dorothea") 
+namestochange <- colnames(viper_scores_df)
+
+viper_scores_df %>% data.frame() 
+t_viper_scores_df <- viper_scores_df %>% t()
+
+## We create a data frame containing the cells and their clusters
+# change idents from seurat clusters to group
+Idents(plf) <- "group"
+CellsClusters <- data.frame(cell = names(Idents(plf)), 
+                            cell_type = as.character(Idents(plf)),
+                            stringsAsFactors = FALSE)
+
+## We create a data frame with the Viper score per cell and its clusters
+viper_scores_clusters <- t_viper_scores_df %>%
+  data.frame() %>% 
+  rownames_to_column("cell") %>%
+  gather(tf, activity, -cell) %>%
+  inner_join(CellsClusters)
+
+## We summarize the Viper scores by cellpopulation
+summarized_viper_scores <- viper_scores_clusters %>% 
+  group_by(tf, cell_type) %>%
+  summarise(avg = mean(activity),
+            std = sd(activity))
+
+## We select the 20 most variable TFs. (20*6 populations = 120)
+highly_variable_tfs <- summarized_viper_scores %>%
+  group_by(tf) %>%
+  mutate(var = var(avg))  %>%
+  ungroup() %>%
+  top_n(120, var) %>%
+  distinct(tf)
+
+## We prepare the data for the plot
+summarized_viper_scores_df <- summarized_viper_scores %>%
+  semi_join(highly_variable_tfs, by = "tf") %>%
+  dplyr::select(-std) %>%   
+  spread(tf, avg) %>%
+  data.frame(row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+
+## It's easier to look at after changing the order of the data
+x <- c("Healthy 7D", "MI 3D", "MI 7D", "MI 2W", "Sham 7D", "Sham 2W")
+s <- t(summarized_viper_scores_df)
+t <- s[, c(1, 3, 4, 2, 6, 5)]
+
+palette_length = 100
+my_color = colorRampPalette(c("Darkblue", "white","red"))(palette_length)
+my_color = colorRampPalette(c("Darkblue", "white","orange"))(palette_length)
+
+my_breaks <- c(seq(min(summarized_viper_scores_df), 0, 
+                   length.out=ceiling(palette_length/2) + 1),
+               seq(max(summarized_viper_scores_df)/palette_length, 
+                   max(summarized_viper_scores_df), 
+                   length.out=floor(palette_length/2)))
+
+# main = "TF activity inference" can be added using inkscape
+viper_hmap <- pheatmap(summarized_viper_scores_df, fontsize = 12, 
+                       color= my_color, breaks = my_breaks, 
+                       angle_col = 90,
+                       treeheight_col = 10,  border_color = "white", height = 600, width = 1600, cellwidth = 20, cellheight = 20)
+viper_hmap
+```
+</div>
+
+### Step 17: Analysis of cells from cluster 7, 11 and 1
+## This piece of analysis is pending.
