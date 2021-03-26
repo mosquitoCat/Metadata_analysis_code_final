@@ -1,0 +1,1272 @@
+---
+title: "Module1"
+author: "Cass Li"
+date: "23/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+Module 1 Meta-analysis of all mouse scRNA-seq data
+
+Hypothesis: Developmental programs are reactivated in adult cardiac EC after ischaemic injury to regulate vascular regeneration.
+
+Datasets involved in this part include:
+1. Healthy P6: GSE118545
+2. Healthy P10: GSE118545
+3. Healthy Adult: GSE132880
+4. MI3W P2: GSE117893
+5. MI1D Adult: E_MTAB_9816
+6. MI3D Adult: E_MTAB_7376, E_MTAB_9816
+7. MI7D Adult: GSE132880
+8. MI2W Adult: E_MTAB_9816, GSE136088
+9. MI4W Adult: E_MTAB_9816
+
+### Step 1 Load libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(spatstat)
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(dplyr)
+library(topGO)
+library(biomaRt)
+library(org.Mm.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(grid)
+library(tibble)
+library(Biobase)
+library(plotly)
+library(GENIE3)
+library(RcisTarget)
+library(readxl)
+```
+</div>
+
+### Step 2: Load data
+
+This step includes loading the extracted EC objects, converting the human objects to mouse objects, and integrate all objects.
+
+<div class = "teal">
+```{r map create new objects and add metadata}
+# load individual objects
+ob1_P6 <- readRDS("GSE118545_P6.rds")
+ob2_P10 <- readRDS("GSE118545_P10.rds")
+ob3_adult <- readRDS("GSE132880_Healthy_EC.rds")
+ob4_P2MI3W <- readRDS("GSE117893_P2MI3W.rds")
+ob5_MI1D <- readRDS("E_MTAB_9816_MI1D_EC.rds")
+ob6_MI3D <- readRDS("E_MTAB_7376_MI3D_EC.rds")
+ob7_MI3D <- readRDS("E_MTAB_9816_MI3D_EC.rds")
+ob8_MI7D <- readRDS("GSE132880_MI7D_EC.rds")
+ob9_MI2W <- readRDS("GSE136088_2WMI.rds")
+ob10_MI2W <- readRDS("E_MTAB_9816_MI2W_EC.rds")
+ob11_MI4W <- readRDS("E_MTAB_9816_MI4W_EC.rds")
+
+# combine the objects into a list
+oblist1 <- c(ob1_P6, ob2_P10, ob3_adult, ob4_P2MI3W, ob5_MI1D, ob6_MI3D, ob7_MI3D, ob8_MI7D, ob9_MI2W, ob10_MI2W, ob11_MI4W)
+
+# extract mitochondrial genes as mito1
+mito1 <- c()
+for (i in oblist) {
+        mito.touse <- grep(pattern = "^mt-", x = rownames(i@assays$RNA@counts), value = TRUE)
+        mito1 <- append(mito1, mito.touse)
+}
+mito1
+
+# extract mitochondrial genes from mito carta as mito2
+mito.reference <- read_excel("mito carta 2.0 reference lists/Mouse.MitoCarta2.0.xls", sheet = 2) # 1158 genes in total
+# filter the reference gene list based on the subcellular localisation provided by the last column " HPA_PrimarySubcellularLocalization_2015".
+mito2 <- dplyr::filter (mito.reference, grepl("Mitochondria", HPA_PrimarySubcellularLocalization_2015))$Symbol # 354 genes in total
+
+# combine the two lists
+mito <- unique(c(mito1, mito2))
+save(mito, file = "mitotouse.RData")
+
+# define %!in% function
+'%!in%' <- function(x, y) {!'%in%'(x, y)}
+
+################################################################################
+# tidying up the metadata
+# ob1_P6
+counts_ob1_P6 <- ob1_P6@assays$RNA@counts
+new_counts_ob1_P6 <- counts_ob1_P6[rownames(counts_ob1_P6) %!in% mito, ]
+new_ob1_P6 <- CreateSeuratObject(counts = new_counts_ob1_P6)
+new_ob1_P6@meta.data <- new_ob1_P6@meta.data %>% mutate (species = "Mouse", age = "Neonatal", detailedage = "P6", condition = "Normal", detailedcondition = "Healthy", source = "GSE118545")
+rownames(new_ob1_P6@meta.data) <- colnames(new_ob1_P6@assays$RNA@counts)
+saveRDS(new_ob1_P6, file = "new_ob1_P6.rds")
+
+# ob2_P10
+counts_ob2_P10 <- ob2_P10@assays$RNA@counts
+new_counts_ob2_P10 <- counts_ob2_P10[rownames(counts_ob2_P10) %!in% mito, ]
+new_ob2_P10 <- CreateSeuratObject(counts = new_counts_ob2_P10)
+new_ob2_P10@meta.data <- new_ob2_P10@meta.data %>% mutate (species = "Mouse", age = "Neonatal", detailedage = "P10", condition = "Normal", detailedcondition = "Healthy", source = "GSE118545")
+rownames(new_ob2_P10@meta.data) <- colnames(new_ob2_P10@assays$RNA@counts)
+saveRDS(new_ob2_P10, file = "new_ob2_P10.rds")
+
+# ob3_adult
+counts_ob3_adult <- ob3_adult@assays$RNA@counts
+new_counts_ob3_adult <- counts_ob3_adult[rownames(counts_ob3_adult) %!in% mito, ]
+new_ob3_adult <- CreateSeuratObject(counts = new_counts_ob3_adult)
+new_ob3_adult@meta.data <- new_ob3_adult@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Normal", detailedcondition = "Healthy", source = "GSE132880")
+rownames(new_ob3_adult@meta.data) <- colnames(new_ob3_adult@assays$RNA@counts)
+saveRDS(new_ob3_adult, file = "new_ob3_adult.rds")
+
+# ob4_P2MI3W
+counts_ob4_P2MI3W <- ob4_P2MI3W@assays$RNA@counts
+new_counts_ob4_P2MI3W <- counts_ob4_P2MI3W[rownames(counts_ob4_P2MI3W) %!in% mito, ]
+new_ob4_P2MI3W <- CreateSeuratObject(counts = new_counts_ob4_P2MI3W)
+new_ob4_P2MI3W@meta.data <- new_ob4_P2MI3W@meta.data %>% mutate (species = "Mouse", age = "Neonatal", detailedage = "P2", condition = "Injured", detailedcondition = "MI3W", source = "GSE117893")
+rownames(new_ob4_P2MI3W@meta.data) <- colnames(new_ob4_P2MI3W@assays$RNA@counts)
+saveRDS(new_ob4_P2MI3W, file = "new_ob4_P2MI3W.rds")
+
+# ob5_MI1D
+counts_ob5_MI1D <- ob5_MI1D@assays$RNA@counts
+new_counts_ob5_MI1D <- counts_ob5_MI1D[rownames(counts_ob5_MI1D) %!in% mito, ]
+new_ob5_MI1D <- CreateSeuratObject(counts = new_counts_ob5_MI1D)
+new_ob5_MI1D@meta.data <- new_ob5_MI1D@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI1D", source = "E_MTAB_9816")
+rownames(new_ob5_MI1D@meta.data) <- colnames(new_ob5_MI1D@assays$RNA@counts)
+saveRDS(new_ob5_MI1D, file = "new_ob5_MI1D.rds")
+
+# ob6_MI3D
+counts_ob6_MI3D <- ob6_MI3D@assays$RNA@counts
+new_counts_ob6_MI3D <- counts_ob6_MI3D[rownames(counts_ob6_MI3D) %!in% mito, ]
+new_ob6_MI3D <- CreateSeuratObject(counts = new_counts_ob6_MI3D)
+new_ob6_MI3D@meta.data <- new_ob6_MI3D@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI3D", source = "E_MTAB_7376")
+rownames(new_ob6_MI3D@meta.data) <- colnames(new_ob6_MI3D@assays$RNA@counts)
+saveRDS(new_ob6_MI3D, file = "new_ob6_MI3D.rds")
+
+# ob7_MI3D
+counts_ob7_MI3D <- ob7_MI3D@assays$RNA@counts
+new_counts_ob7_MI3D <- counts_ob7_MI3D[rownames(counts_ob7_MI3D) %!in% mito, ]
+new_ob7_MI3D <- CreateSeuratObject(counts = new_counts_ob7_MI3D)
+new_ob7_MI3D@meta.data <- new_ob7_MI3D@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI3D", source = "E_MTAB_9816")
+rownames(new_ob7_MI3D@meta.data) <- colnames(new_ob7_MI3D@assays$RNA@counts)
+saveRDS(new_ob7_MI3D, file = "new_ob7_MI3D.rds")
+
+# ob8_MI7D
+counts_ob8_MI7D <- ob8_MI7D@assays$RNA@counts
+new_counts_ob8_MI7D <- counts_ob8_MI7D[rownames(counts_ob8_MI7D) %!in% mito, ]
+new_ob8_MI7D <- CreateSeuratObject(counts = new_counts_ob8_MI7D)
+new_ob8_MI7D@meta.data <- new_ob8_MI7D@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI7D", source = "GSE132880")
+rownames(new_ob8_MI7D@meta.data) <- colnames(new_ob8_MI7D@assays$RNA@counts)
+saveRDS(new_ob8_MI7D, file = "new_ob8_MI7D.rds")
+
+# ob9_MI2W
+counts_ob9_MI2W <- ob9_MI2W@assays$RNA@counts
+new_counts_ob9_MI2W <- counts_ob9_MI2W[rownames(counts_ob9_MI2W) %!in% mito, ]
+new_ob9_MI2W <- CreateSeuratObject(counts = new_counts_ob9_MI2W)
+new_ob9_MI2W@meta.data <- new_ob9_MI2W@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI2W", source = "GSE136088")
+rownames(new_ob9_MI2W@meta.data) <- colnames(new_ob9_MI2W@assays$RNA@counts)
+saveRDS(new_ob9_MI2W, file = "new_ob9_MI2W.rds")
+
+# ob10_MI2W
+counts_ob10_MI2W <- ob10_MI2W@assays$RNA@counts
+new_counts_ob10_MI2W <- counts_ob10_MI2W[rownames(counts_ob10_MI2W) %!in% mito, ]
+new_ob10_MI2W <- CreateSeuratObject(counts = new_counts_ob10_MI2W)
+new_ob10_MI2W@meta.data <- new_ob10_MI2W@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI2W", source = "E_MTAB_9816")
+rownames(new_ob10_MI2W@meta.data) <- colnames(new_ob10_MI2W@assays$RNA@counts)
+saveRDS(new_ob10_MI2W, file = "new_ob10_MI2W.rds")
+
+# ob11_MI4W
+counts_ob11_MI4W <- ob11_MI4W@assays$RNA@counts
+new_counts_ob11_MI4W <- counts_ob11_MI4W[rownames(counts_ob11_MI4W) %!in% mito, ]
+new_ob11_MI4W <- CreateSeuratObject(counts = new_counts_ob11_MI4W)
+new_ob11_MI4W@meta.data <- new_ob11_MI4W@meta.data %>% mutate (species = "Mouse", age = "Adult", detailedage = "Adult", condition = "Injured", detailedcondition = "MI4W", source = "E_MTAB_9816")
+rownames(new_ob11_MI4W@meta.data) <- colnames(new_ob11_MI4W@assays$RNA@counts)
+saveRDS(new_ob11_MI4W, file = "new_ob11_MI4W.rds")
+########################################################
+
+# combine the objects into a list
+oblist2 <- c(new_ob1_P6, new_ob2_P10, new_ob3_adult, new_ob4_P2MI3W, new_ob5_MI1D, new_ob6_MI3D, new_ob7_MI3D, new_ob8_MI7D, new_ob9_MI2W, new_ob10_MI2W, new_ob11_MI4W)
+
+# extract all genes in the datasets
+allgene <- c()
+for (j in oblist2) {
+        gene <- rownames(j)
+        allgene <- append(allgene, gene)
+}
+allgene <- unique(allgene)
+length(allgene) # 31481
+save(allgene, file = "allgene.Rdata")
+```
+</div>
+
+### Step 3: SCT transform and integrate all objects.
+
+<div class = "teal">
+```{r integrate objects, warning = FALSE}
+# change accessible memory
+options(future.globals.maxSize = 10000 * 1024^2)
+
+# collect gene and cell numbers from each object
+md <- data.frame()
+for (k in oblist2) {
+        dat <- data.frame(Ngenes = dim(k)[1], Ncells = dim(k)[2], dataset = unique( paste0(k@meta.data$detailedcondition, "_", k@meta.data$detailedage, "_", k@meta.data$source)))
+        md <- rbind(md, dat) # add it to your list
+}
+save(md, file = "new_ob_meta.RData")
+
+# This line definitely works but just don't know why the previous one doesn't
+list <- lapply(X = oblist2, FUN = SCTransform)
+
+# Integrate data - it takes awefully long time to finish.
+features <- SelectIntegrationFeatures(object.list = list, nfeatures = 3000)
+save(features, file = "features.RData")
+
+list <- PrepSCTIntegration(object.list = list, anchor.features = features, verbose = T)
+
+anchors <- FindIntegrationAnchors(object.list = list, normalization.method = "SCT", anchor.features = features, verbose = FALSE, k.filter = 20) # if the metadata names is not updated then this line is likely to go wrong.
+save(anchors, file = "anchors.RData")
+
+integrated <- IntegrateData(anchorset = anchors, normalization.method = "SCT", k.weight = 30)
+saveRDS(integrated, file = "integrated.rds") # had to change k.weight from 100 to 30 as the MI1D dataset only has 59 cells.
+# tried with all the genes but run out of memory
+```
+</div>
+
+### Step 4: Dimensional reduction
+
+<div class = "teal">
+```{r dimensional reduction, message = FALSE, warning = FALSE}
+integrated <- RunPCA(integrated, verbose = FALSE)
+set.seed(1024)
+integrated <- RunUMAP(integrated, dims = 1:50)
+saveRDS(integrated, file = "integrated.rds")
+rownames(integrated@meta.data) <- colnames(integrated@assays$RNA@counts)
+
+# add group to metadata
+integrated$group <- paste0(integrated$detailedage, " ", integrated$detailedcondition)
+saveRDS(integrated, file = "integrated.rds")
+
+integrated$group <- factor(integrated$group, levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+# It's very important to have an overall view of the dataset and for this purpose, I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(integrated@reductions$umap@cell.embeddings, integrated@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Open Sans",
+  size = 13,
+  color = 'black')
+
+## nCount_RNA
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ nCount_RNA, colors = viridisLite::viridis(10), marker = list(size = 10, line = list(color = "black", width = 1)), width = 500, height = 500) %>% layout(title = "nCount_RNA", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t)%>% hide_legend() %>% hide_colorbar()
+
+## nFeature_RNA
+p2 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ nFeature_RNA, colors = viridisLite::magma(10), marker = list(size = 10, line = list(color = "black", width = 1)), width = 500, height = 500) %>% layout(title = "nFeature_RNA", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+## group
+colours <- c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ group, colors = colours, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+```
+</div>
+
+### Step 5: Clustering, marker check and GO analysis
+
+<div class = "teal">
+```{r clustering_and_GO, message = FALSE, warning = FALSE}
+integrated <- FindNeighbors(integrated, dims = 1:50)
+# to determine the resolution of the clustering process
+    
+for (i in 1:20) {
+    integrated <- FindClusters(integrated, resolution = 0.1*i)
+}
+    
+png("clustree.png", res = 300, width = 4000, height = 3000)
+clustree(integrated) # cluster tree visualisation
+dev.off()
+
+png("clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# It seems resolution 0.5 is a good choice and change the clusters to the res 0.5 one
+integrated@meta.data$seurat_clusters <- integrated@meta.data$integrated_snn_res.0.5
+integrated <- FindClusters(integrated, resolution = 0.5)
+saveRDS(integrated, file = "integrated.rds")
+
+png("clustering_integrated.png", res = 300, width = 1800, height = 1800)
+DimPlot(integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(integrated, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+# Plot the group QCs
+
+# GO analysis
+length <- length(unique(integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(integrated, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.50)]
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("Cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("Cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 3000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat = "identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+} 
+```
+</div>
+
+### Step 6: Replot the clustering plot by cluster and condition
+
+<div class = "teal">
+```{r clustering map replot, message = FALSE, warning = FALSE}
+# It's very important to have an overall view of the dataset and for this purpose, I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(integrated@reductions$umap@cell.embeddings, integrated@meta.data)
+
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Open Sans",
+  size = 16,
+  color = 'black')
+
+################
+# COLOUR BUILT #
+################
+p <- DimPlot(integrated, label = TRUE, label.size = 6) + NoLegend()
+# isolate colour used in the Seurat package
+colourbuilt <- ggplot_build(p)[[1]][[1]][,  c(1, 5)]
+# reduce to unique colour and cluster information
+further <- distinct(colourbuilt)
+further <- further[order(further$group), ]
+further.colour <- further$colour
+
+# coloured by cluster
+df <- df %>% dplyr::mutate (cluster = integrated@meta.data$seurat_clusters)
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ cluster, colors = further.colour, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+# bar plot and pie chart for clusters
+dfx <- df %>% group_by(cluster) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+figx <- plot_ly(dfx, x = ~ cluster, y = ~ count, type = 'bar', marker = list(color = further.colour, line = list(color = "black", width = 1)))
+figx_pie <- plot_ly(dfx, labels = ~ cluster, values = ~ percentage, type = 'pie', marker = list(colors = further.colour, line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24), insidetextorientation = "radial") %>% hide_legend()
+
+# bar plot and pie chart for groups
+dfy <- df %>% group_by(group) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+
+dfy$group <- factor(dfy$group, levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+## recolour
+colours <- c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+## bar plot
+figy <- plot_ly(dfy, x = ~ group, y = ~ count, type = 'bar', marker = list(color = colours, line = list(color = "black", width = 1)))
+## pie chart
+figy_pie <- plot_ly(dfy, labels = ~ group, values = ~ percentage, type = 'pie', marker = list(colors = colours, line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24), insidetextorientation = "radial") 
+```
+</div>
+
+### Step 7: cluster marker identification
+
+<div class = "teal">
+```{r cluster marker identification and marker check, message = FALSE, warning = FALSE}
+DefaultAssay(integrated) <- "RNA"
+markers <- FindAllMarkers(integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25) 
+write.csv(markers, file = "markers.csv")
+markers_top20 <- markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC) %>% dplyr::filter (p_val_adj < 0.05)
+write.csv(markers_top20, file = "top20markers.csv")
+
+# identify conserved cell type markers
+# FindConservedMarkers is like performing FindMarkers for each dataset separately in the integrated analysis and then calculating their combined P-value.
+
+# condition grouping
+for (i in levels(integrated)) {
+  cons_markers[i] <- FindConservedMarkers(integrated, ident.1 = i, grouping.var = "condition", verbose = FALSE)
+  # Select 'avg_log2FC' columns indices
+  avg_log2FC_columns <- grep(pattern = "avg_log2FC", x = colnames(x = cons_markers))
+  # Compute mean 'avg_lo2gFC'
+  cons_markers$mean_avg_log2FC <- rowMeans(x = cons_markers[avg_log2FC_columns])
+  newdf <- cons_markers[, 12:13]
+  ## For upregulated genes
+  # Order by 'mean_avg_log2FC'
+  newdf_up <- newdf[order(newdf$mean_avg_log2FC, decreasing = TRUE), ] %>% top_n(n = 50)
+  write.csv(simp_newdf_up, file = paste0("cluster", i, "top50_upregulated_cons_markers_condition.csv"))
+  ## For downregulated genes
+  newdf_down <- newdf[order(newdf$mean_avg_log2FC, decreasing = FALSE), ] %>% top_n(n = 50)
+  write.csv(newdf_down, file = paste0("cluster", i, "top50_downregulated_cons_markers_condition.csv"))
+}
+
+# FindConservedMarkers is to find markers from two groups respectively, and then combine both results. You could use either of these two pvalue to determine marker genes: max_pval which is largest p value of p value calculated by each group or minimump_p_val which is a combined p value. #1705
+# Gene-level p-values are computed for each condition and then combined across groups using meta-analysis methods from the MetaDE R package.
+```
+</div>
+
+When "group" was used as the grouping variable, the adjusted p-values are all around 1;
+
+### Step 8: cluster composition analysis
+
+<div class = "teal">
+```{r cluster composition analysis, message = FALSE, warning = FALSE}
+# select the feature to analyse
+meta_to_use <- integrated@meta.data[, c("group", "seurat_clusters")]
+
+# summarise the parametres
+summary <- meta_to_use %>% group_by(group, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(group) %>% tally())
+
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(group == "P6 Healthy" ~ n/group_number[1, 2]*100, group == "P10 Healthy" ~ n/group_number[2, 2]*100, group == "P2 MI3W" ~ n/group_number[3, 2]*100, group == "Adult Healthy" ~ n/group_number[4, 2]*100, group == "Adult MI1D" ~ n/group_number[5, 2]*100, group == "Adult MI3D" ~ n/group_number[6, 2]*100, group == "Adult MI7D" ~ n/group_number[7, 2]*100, group == "Adult MI2W" ~ n/group_number[8, 2]*100, group == "Adult MI4W" ~ n/group_number[9, 2]*100))
+
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100, seurat_clusters == "10" ~ percentage/summary1[11, 2]*100, seurat_clusters == "11" ~ percentage/summary1[12, 2]*100, seurat_clusters == "12" ~ percentage/summary1[13, 2]*100, seurat_clusters == "13" ~ percentage/summary1[14, 2]*100, seurat_clusters == "14" ~ percentage/summary1[15, 2]*100))
+
+write.csv(summary, file = "cluster_composition.csv")
+
+# choose a reference group
+Adult_data <- summary %>% filter (group == "Adult Healthy")
+Adult_table <- Adult_data[, c(2, 5)]
+cluster_levels <- Adult_table[order(Adult_table$percentage_norm), ]$seurat_clusters
+summary$seurat_clusters <- factor(summary$seurat_clusters,levels = cluster_levels)
+
+# normalised percentage graph
+#png("cluster_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = colours) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+#dev.off()
+
+# Calculate the dominant group
+summary <- summary %>% mutate (dominant = case_when(percentage_norm >= 20 ~ "Y", percentage_norm < 20 ~ "N"))
+write.csv(summary, file = "summary_percentage_dominant.csv")
+```
+</div>
+
+### Step 9: conserved cluster marker plotting
+
+Identifying all markers analysis is typically recommended for when evaluating a single sample group/condition. 
+
+<div class = "teal">
+```{r conserved cluster marker analysis, message = FALSE, warning = FALSE}
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+cluster0_feature <- c("Eln", "Hsp90aa1", "Dach1", "Cyyr1") # none of them are ideal
+cluster1_feature <- c("Trp53i11", "Mest", "Prnd", "Csrp1") # Trp53i11
+cluster2_feature <- c("Aqp7", "Btnl9", "Cdkn1c", "Car4") # Aqp7
+cluster3_feature <- c("Aqp1", "Igfbp5", "Rassf9") # Aqp1
+cluster4_feature <- c("Btg2", "Cdkn1a", "Apold1", "Irf1") # Btg2
+cluster5_feature <- c("Fbln5", "Gja5", "Hey1", "Sox17") # Fbln5
+cluster6_feature <- c("Stmn1", "Hmgb2", "Cdc20", "Cenpf", "Top2a") # Stmn1
+cluster7_feature <- c("Hspg2", "Pdgfb", "Notch4") # none of them are ideal
+cluster8_feature <- c("Cox6a2", "Ankrd1", "Tnni3", "Pln") # Cox6a2
+cluster9_feature <- c("Plvap", "Lrg1", "Tmem176a", "Tmem176b") # Plvap
+cluster10_feature <- c("Rbm20", "Slc8a1", "Ctnna3", "Myocd") # Slc8a1
+cluster11_feature <- c("Col3a1", "Col1a1", "Dcn", "Col1a2") # Col3a1
+cluster12_feature <- c("Ifit2", "Cxcl10", "Isg15", "Gbp2") # Ifit2
+cluster13_feature <- c("Ctss", "Wfdc17", "Cd14", "C1qc") # Ctss
+cluster14_feature <- c("Rgs4", "Myh11", "Higd1b", "Gucy1a3") # Rgs4
+  
+p1 <- VlnPlot(integrated, features = cluster0_feature, pt.size = 0)
+
+# plot the top markers
+markers.to.plot <- c("Eln", "Trp53i11", "Aqp7", "Aqp1", "Btg2", "Fbln5", "Stmn1", "Hspg2", "Cox6a2", "Plvap", "Slc8a1", "Col3a1", "Ifit2", "Ctss", "Rgs4")
+p2 <- DotPlot(integrated, features = rev(markers.to.plot), cols = c("blue", "red"), split.by = "condition", dot.scale = 5) + RotatedAxis()
+ggplotly(p2, width = 600, height = 800)
+```
+</div>
+
+### Step 10: differentially expressed cluster marker plotting
+
+<div class = "teal">
+```{r differentially expressed cluster markeranalysis, message = FALSE, warning = FALSE}
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+saveRDS(integrated, file = "integrated.rds")
+# overall DEG
+Idents(integrated) <- "condition"
+AllDEG <- FindMarkers(integrated, ident.1 = "Normal", ident.2 = "Injured", min.pct = 0.25, verbose = FALSE)
+write.csv(AllDEG, file = "DEG_condition.csv")
+
+# top 50
+## downregulated in injured
+AllDEG_top50_down <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+AllDEG_top50_down <- AllDEG_top50_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_down, file = "top50_downregulated_DEG_condition.csv")
+## upregulated in injured
+AllDEG_top50_up <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+AllDEG_top50_up <- AllDEG_top50_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_up, file = "top50_upregulated_DEG_condition.csv")
+
+# plot up and down regulated genes
+Idents(integrated) <- "seurat_clusters"
+feature_up <- rownames(AllDEG_top50_up)[1:10]
+feature_down <- rownames(AllDEG_top50_down) [1:10]
+
+p1 <- VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+p2 <- VlnPlot(integrated, features = feature_down, pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+p3 <- VlnPlot(integrated, features = c(feature_up, feature_down), pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+```
+</div>
+
+### Step 11: Module 1b comparison 1 
+
+(healthy P6 and P10) vs healthy adult – baseline cell proliferation (Biological question: what are the genes required for early postnatal cell proliferation that have been turned down/off in adult?)
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+***I first analysed DEGs for all cells.***
+
+<div class = "teal">
+```{r Module 1b comparison 1 all cells, message = FALSE, warning = FALSE}
+# change the Idents to group so I can look at P6 Healthy, P10 Healthy and Adult Healthy
+Idents(integrated) <- "group"
+# step1 : pseudo-bulk DEG for all cells between P6 and P10, P6 and healthy, P10 and healthy
+###########
+# P6 vs P10
+###########
+P6P10AllDEG <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P10 Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P6P10AllDEG, file = "P6P10AllDEG.csv")
+
+# top 50
+## downregulated in P10
+P6P10AllDEG_down <- P6P10AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6P10AllDEG_top50_down <- P6P10AllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P10AllDEG_top50_down, file = "top50_downregulated_P6P10AllDEG.csv")
+View(P6P10AllDEG_top50_down)
+## upregulated in P10
+P6P10AllDEG_up <- P6P10AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6P10AllDEG_top50_up <- P6P10AllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P10AllDEG_top50_up, file = "top50_upregulated_P6P10AllDEG.csv")
+View(P6P10AllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(P6P10AllDEG_top50_up)[1:10]
+feature_down <- rownames(P6P10AllDEG_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P10 Healthy"), ncol = 6, cols = c("#7879ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P10 Healthy"), ncol = 6, cols = c("#7879ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+##############
+# P10 vs Adult
+##############
+P10AdultAllDEG <- FindMarkers(integrated, ident.1 = "P10 Healthy", ident.2 = "Adult Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P10AdultAllDEG, file = "P10AdultAllDEG.csv")
+
+# top 50
+## downregulated in P10
+P10AdultAllDEG_down <- P10AdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P10AdultAllDEG_top50_down <- P10AdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P10AdultAllDEG_top50_down, file = "top50_downregulated_P10AdultAllDEG.csv")
+View(P10AdultAllDEG_top50_down)
+## upregulated in P10
+P10AdultAllDEG_up <- P10AdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P10AdultAllDEG_top50_up <- P10AdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P10AdultAllDEG_top50_up, file = "top50_upregulated_P10AdultAllDEG.csv")
+View(P10AdultAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(P10AdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(P10AdultAllDEG_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P10 Healthy", "Adult Healthy"), ncol = 6, cols = c("#0000ff", "#7879ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P10 Healthy", "Adult Healthy"), ncol = 6, cols = c("#0000ff", "#7879ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+##############
+# P6 vs Adult
+##############
+P6AdultAllDEG <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "Adult Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P6AdultAllDEG, file = "P6AdultAllDEG.csv")
+
+# top 50
+## downregulated in P6
+P6AdultAllDEG_down <- P6AdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6AdultAllDEG_top50_down <- P6AdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6AdultAllDEG_top50_down, file = "top50_downregulated_P6AdultAllDEG.csv")
+View(P6AdultAllDEG_top50_down)
+## upregulated in P6
+P6AdultAllDEG_up <- P6AdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6AdultAllDEG_top50_up <- P6AdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6AdultAllDEG_top50_up, file = "top50_upregulated_P6AdultAllDEG.csv")
+View(P6AdultAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(P6AdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(P6AdultAllDEG_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "Adult Healthy"), ncol = 6, cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "Adult Healthy"), ncol = 6, cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+```
+</div>
+
+***I first analysed DEGs for proliferating cells.***
+
+When I specifically focused on proliferating cells, I wanted to find out what are the uniquely up or down regulated genes in this particular cluster. I extracted lists of DEGs using the same method as before between P6, P10 and Adult in proliferating cells. Then I compared these DEGs with the DEGs I extracted using all cells from all the clusters to find the ones that are unique to proliferating cells. No unique down-regulated DEGs were found in P10 compared to P6 or in Adult compared to P10.
+For the unique up-regulated DEGs, Got1 was the only gene upregulated in P10 compared to P6 and 20 genes including 2700094K13Rik, Stmn1 were upregulated in Adult compared to P10. I put these 20 genes through Genemania and they are simply genes associated with cell division. Nsd2 and Rack1 were down-regulated in Adult compared to P6 and most upregulated genes identified in Adult compared to P10 were also upregulated when compared to P6. It is also worth mentioning that the only gene down-regulated in P10 proliferating cells is Xist compare to the P6 proliferating cells. 
+
+
+<div class = "teal">
+```{r Module 1b comparison 1 all cells, message = FALSE, warning = FALSE}
+# change idents to cluster to subset cluster 6 cells
+Idents(integrated) <- "seurat_clusters"
+# extract the proliferating cluster
+proliferate <- subset(integrated, idents = 6)
+DefaultAssay(proliferate) <- "RNA"
+proliferate <- NormalizeData(proliferate)
+# Change idents back to group
+Idents(proliferate) <- "group"
+###########
+# P6 vs P10
+###########
+P6P10ProAllDEG <- FindMarkers(proliferate, ident.1 = "P6 Healthy", ident.2 = "P10 Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P6P10ProAllDEG, file = "P6P10ProAllDEG.csv")
+
+# top 50
+## downregulated in P10
+P6P10ProAllDEG_down <- P6P10ProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6P10ProAllDEG_top50_down <- P6P10ProAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P10ProAllDEG_top50_down, file = "top50_downregulated_P6P10ProAllDEG.csv")
+View(P6P10ProAllDEG_top50_down)
+## specifically to proliferating cells
+common1 <- intersect(rownames(P6P10ProAllDEG_down), rownames(P6P10AllDEG_down))
+unique1 <- P6P10ProAllDEG_down %>% filter (rownames(P6P10ProAllDEG_down) %!in% common1)
+View(unique1) # no unique markers but Xist is the only one downregulated 
+write.csv(unique1, file = "unique_downregulated_P6P10ProAllDEG.csv")
+
+## upregulated in P10
+P6P10ProAllDEG_up <- P6P10ProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6P10ProAllDEG_top50_up <- P6P10ProAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P10ProAllDEG_top50_up, file = "top50_upregulated_P6P10ProAllDEG.csv")
+View(P6P10ProAllDEG_top50_up)
+## specifically to proliferating cells
+common2 <- intersect(rownames(P6P10ProAllDEG_up), rownames(P6P10AllDEG_up))
+unique2 <- P6P10ProAllDEG_up %>% filter (rownames(P6P10ProAllDEG_up) %!in% common2)
+View(unique2) # Got1
+write.csv(unique2, file = "unique_upregulated_P6P10ProAllDEG.csv")
+
+# plot up and down regulated genes
+VlnPlot(proliferate, features = c("Xist", "Got1"), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P10 Healthy"), ncol = 2, cols = c("#7879ff", "#bfbfff"), same.y.lims = TRUE, stack = FALSE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#############
+# P6 vs Adult
+#############
+P6AdultProAllDEG <- FindMarkers(proliferate, ident.1 = "P6 Healthy", ident.2 = "Adult Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P6AdultProAllDEG, file = "P6AdultProAllDEG.csv")
+
+# top 50
+## downregulated in Adult
+P6AdultProAllDEG_down <- P6AdultProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6AdultProAllDEG_top50_down <- P6AdultProAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6AdultProAllDEG_top50_down, file = "top50_downregulated_P6AdultProAllDEG.csv")
+View(P6AdultProAllDEG_top50_down)
+## specifically to proliferating cells
+common1 <- intersect(rownames(P6AdultProAllDEG_down), rownames(P6AdultAllDEG_down))
+unique1 <- P6AdultProAllDEG_down %>% filter (rownames(P6AdultProAllDEG_down) %!in% common1)
+View(unique1) # Nsd2, Rack1
+write.csv(unique1, file = "unique_downregulated_P6AdultProAllDEG.csv")
+
+## upregulated in Adult
+P6AdultProAllDEG_up <- P6AdultProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6AdultProAllDEG_top50_up <- P6AdultProAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6AdultProAllDEG_top50_up, file = "top50_upregulated_P6AdultProAllDEG.csv")
+View(P6AdultProAllDEG_top50_up)
+## specifically to proliferating cells
+common2 <- intersect(rownames(P6AdultProAllDEG_up), rownames(P6AdultAllDEG_up))
+unique2 <- P6AdultProAllDEG_up %>% filter (rownames(P6AdultProAllDEG_up) %!in% common2)
+View(unique2) # 2700094K13Rik, Hnrnpa1, Casc5
+write.csv(unique2, file = "unique_upregulated_P6AdultProAllDEG.csv")
+
+# plot up and down regulated genes
+VlnPlot(proliferate, features = c("Nsd2", "Rack1", "2700094K13Rik", "Hnrnpa1"), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "Adult Healthy"), ncol = 2, cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = FALSE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#############
+# P10 vs Adult
+#############
+P10AdultProAllDEG <- FindMarkers(proliferate, ident.1 = "P10 Healthy", ident.2 = "Adult Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P10AdultProAllDEG, file = "P10AdultProAllDEG.csv")
+
+# top 50
+## downregulated in Adult
+P10AdultProAllDEG_down <- P10AdultProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P10AdultProAllDEG_top50_down <- P10AdultProAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P10AdultProAllDEG_top50_down, file = "top50_downregulated_P10AdultProAllDEG.csv")
+View(P10AdultProAllDEG_top50_down)
+## specifically to proliferating cells
+common1 <- intersect(rownames(P10AdultProAllDEG_down), rownames(P10AdultAllDEG_down))
+unique1 <- P10AdultProAllDEG_down %>% filter (rownames(P10AdultProAllDEG_down) %!in% common1)
+View(unique1) # None
+write.csv(unique1, file = "unique_downregulated_P10AdultProAllDEG.csv")
+
+## upregulated in Adult
+P10AdultProAllDEG_up <- P10AdultProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P10AdultProAllDEG_top50_up <- P10AdultProAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P10AdultProAllDEG_top50_up, file = "top50_upregulated_P10AdultProAllDEG.csv")
+View(P10AdultProAllDEG_top50_up)
+## specifically to proliferating cells
+common2 <- intersect(rownames(P10AdultProAllDEG_up), rownames(P10AdultAllDEG_up))
+unique2 <- P10AdultProAllDEG_up %>% filter (rownames(P10AdultProAllDEG_up) %!in% common2)
+View(unique2) # 2700094K13Rik, Stmn1
+write.csv(unique2, file = "unique_upregulated_P10AdultProAllDEG.csv")
+
+# plot up and down regulated genes
+VlnPlot(proliferate, features = c("2700094K13Rik", "Stmn1"), pt.size = 0, split.by = "detailedage", idents = c("P10 Healthy", "Adult Healthy"), ncol = 2, cols = c("#0000ff", "#7879ff"), same.y.lims = TRUE, stack = FALSE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+```
+</div>
+
+### Step 12: Module 1b comparison 2 
+
+healthy P6 vs 3WMI P2 – (Biological question: what are the genes associated with postnatal regeneration?)
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+To answer this question, I used a similar approach to the previous question. 
+
+<div class = "teal">
+```{r Module 1b comparison 2 all cells and proliferating cells, message = FALSE, warning = FALSE}
+# study all cells first
+P6P2MI3WAllDEG <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P2 MI3W", min.pct = 0.25, verbose = FALSE)
+write.csv(P6P2MI3WAllDEG, file = "P6P2MI3WAllDEG.csv")
+
+# top 50
+## downregulated in P6
+P6P2MI3WAllDEG_down <- P6P2MI3WAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6P2MI3WAllDEG_top50_down <- P6P2MI3WAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P2MI3WAllDEG_top50_down, file = "top50_downregulated_P6P2MI3WAllDEG.csv")
+View(P6P2MI3WAllDEG_top50_down)
+## upregulated in P6
+P6P2MI3WAllDEG_up <- P6P2MI3WAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6P2MI3WAllDEG_top50_up <- P6P2MI3WAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P2MI3WAllDEG_top50_up, file = "top50_upregulated_P6P2MI3WAllDEG.csv")
+View(P6P2MI3WAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(P6P2MI3WAllDEG_top50_up)[1:10]
+feature_down <- rownames(P6P2MI3WAllDEG_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P2 MI3W"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P2 MI3W"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+###########################################
+# GO analysis for P6P2MI3WAllDEG_top50_down
+###########################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(P6P2MI3WAllDEG_top50_down)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("P6P2MI3WAllDEG_top50_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+png(paste0("P6P2MI3WAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 4000, height = 2000)
+ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("P6P2MI3WAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("P6P2MI3WAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("P6P2MI3WAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+###########################################
+# GO analysis for P6P2MI3WAllDEG_top50_up
+###########################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(P6P2MI3WAllDEG_top50_up)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("P6P2MI3WAllDEG_top50_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("P6P2MI3WAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "violetred", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("P6P2MI3WAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12, family = "Open Sans"), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+########################################
+# Now study the proliferating cells only
+########################################
+P6P2MI3WProAllDEG <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P2 MI3W", min.pct = 0.25, verbose = FALSE)
+write.csv(P6P2MI3WProAllDEG, file = "P6P2MI3WProAllDEG.csv")
+
+## Find DEGs that are unique to proliferating cells
+# top 50
+## downregulated in P2MI
+P6P2MI3WProAllDEG_down <- P6P2MI3WProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+P6P2MI3WProAllDEG_top50_down <- P6P2MI3WProAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P2MI3WProAllDEG_top50_down, file = "top50_downregulated_P6P2MI3WProAllDEG.csv")
+View(P6P2MI3WProAllDEG_top50_down)
+## specifically to proliferating cells
+common1 <- intersect(rownames(P6P2MI3WProAllDEG_down), rownames(P6P2MI3WAllDEG_down))
+unique1 <- P6P2MI3WProAllDEG_down %>% filter (rownames(P6P2MI3WProAllDEG_down) %!in% common1)
+View(unique1) # None
+write.csv(unique1, file = "unique_downregulated_P6P2MI3WProAllDEG.csv")
+
+## upregulated in P2MI
+P6P2MI3WProAllDEG_up <- P6P2MI3WProAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+P6P2MI3WProAllDEG_top50_up <- P6P2MI3WProAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(P6P2MI3WProAllDEG_top50_up, file = "top50_upregulated_P6P2MI3WProAllDEG.csv")
+View(P6P2MI3WProAllDEG_top50_up)
+## specifically to proliferating cells
+common2 <- intersect(rownames(P6P2MI3WProAllDEG_up), rownames(P6P2MI3WAllDEG_up))
+unique2 <- P6P2MI3WProAllDEG_up %>% filter (rownames(P6P2MI3WProAllDEG_up) %!in% common2)
+View(unique2) # 2700094K13Rik, Stmn1
+write.csv(unique2, file = "unique_upregulated_P6P2MI3WProAllDEG.csv")
+
+# plot up and down regulated genes
+VlnPlot(proliferate, features = c("2700094K13Rik", "Stmn1"), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P2MI3W Healthy"), ncol = 2, cols = c("#0000ff", "#7879ff"), same.y.lims = TRUE, stack = FALSE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+```
+</div>
+
+I didn't find any DEGs that are unique to the proliferating cells.
+
+### Step 13: Module 1b comparison 3 
+
+comparison 3: injured adult vs healthy adult (Biological question: what are the genes associated with adult regeneration?)
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+To answer this question, I used a similar approach to the previous question. 
+
+<div class = "teal">
+```{r Module 1b comparison 3 all cells and proliferating cells, message = FALSE, warning = FALSE}
+DefaultAssay(integrated) <- "RNA"
+integrated$newgroup <- paste0(integrated$age, " ", integrated$condition)
+saveRDS(integrated, file = "integrated.rds")
+# with this newgroup, I can work on adult healhty vs adult injured
+# study all cells first
+Idents(integrated) <- "newgroup"
+HealthyInjuredAllDEG <- FindMarkers(integrated, ident.1 = "Adult Normal", ident.2 = "Adult Injured", min.pct = 0.25, verbose = FALSE)
+write.csv(HealthyInjuredAllDEG, file = "AdultHealthyInjuredAllDEG.csv")
+
+# top 50
+## downregulated in Healthy
+HealthyInjuredAllDEG_down <- HealthyInjuredAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+HealthyInjuredAllDEG_top50_down <- HealthyInjuredAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(HealthyInjuredAllDEG_top50_down, file = "top50_downregulated_AdultHealthyInjuredAllDEG.csv")
+View(HealthyInjuredAllDEG_top50_down)
+## upregulated in Healthy
+HealthyInjuredAllDEG_up <- HealthyInjuredAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+HealthyInjuredAllDEG_top50_up <- HealthyInjuredAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(HealthyInjuredAllDEG_top50_up, file = "top50_upregulated_AdultHealthyInjuredAllDEG.csv")
+View(HealthyInjuredAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(HealthyInjuredAllDEG_top50_up)[1:10]
+feature_down <- rownames(HealthyInjuredAllDEG_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Adult Normal", "Adult Injured"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Adult Normal", "Adult Injured"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#################################################
+# GO analysis for HealthyInjuredAllDEG_top50_down
+#################################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(HealthyInjuredAllDEG_top50_down)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("HealthyInjuredAllDEG_top50_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+png(paste0("HealthyInjuredAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 4000, height = 2000)
+ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("HealthyInjuredAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("HealthyInjuredAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("HealthyInjuredAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+#################################################
+# GO analysis for HealthyInjuredAllDEG_top50_up
+#################################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(HealthyInjuredAllDEG_top50_up)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("HealthyInjuredAllDEG_top50_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+png(paste0("HealthyInjuredAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 4000, height = 2000)
+ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("HealthyInjuredAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 18), axis.text.y = element_text(color = "black", size = 18), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 18)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("HealthyInjuredAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "violetred", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("HealthyInjuredAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+```
+</div>
+
+### Step 14: Module 1b comparison 3 
+
+Check the expression of DEGs extracted from comparison 1 & 2 in injured adult and healthy adult, to see if these genes are reactivated (turn on/up) in the injured adult. 
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+<div class = "teal">
+```{r Module 1b comparison 3 all cells and proliferating cells, message = FALSE, warning = FALSE}
+## Compare HealthyInjuredAllDEG_down with P6P2MI3WAllDEG_down
+common_down <- intersect(rownames(HealthyInjuredAllDEG_down), P6P2MI3WAllDEG_down$X)
+## Compare HealthyInjuredAllDEG_up with P6P2MI3WAllDEG_up
+common_up <- intersect(rownames(HealthyInjuredAllDEG_up), P6P2MI3WAllDEG_up$X)
+
+############
+## common_up
+############
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- common_up
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("Common_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("Common_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "violetred", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("Common_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+############
+## common_down
+############
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- common_down
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Mm.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("Common_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("Common_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "grey", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("Common_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+## draw Venn Diagram for the common genes
+library("ggVennDiagram")
+common_down <- intersect(rownames(HealthyInjuredAllDEG_down), P6P2MI3WAllDEG_down$X)
+x1 <- list(
+  A = rownames(HealthyInjuredAllDEG_down), 
+  B = P6P2MI3WAllDEG_down$X 
+  )
+p1 <- ggVennDiagram(x1, label_alpha = 0)
+
+## Compare HealthyInjuredAllDEG_up with P6P2MI3WAllDEG_up
+common_up <- intersect(rownames(HealthyInjuredAllDEG_up), P6P2MI3WAllDEG_up$X)
+x2 <- list(
+  A = rownames(HealthyInjuredAllDEG_up), 
+  B = P6P2MI3WAllDEG_up$X 
+  )
+p2 <- ggVennDiagram(x2, label_alpha = 0)
+```
+</div>
+
+### Step 15: Module 1b comparison 3 different MI timepoints breaking down
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+<div class = "teal">
+```{r Module 1b comparison 3 MI timepoints breakingdown, message = FALSE, warning = FALSE}
+DefaultAssay(integrated) <- "RNA"
+Idents(integrated) <- "group"
+
+# Adult MI1D vs Adult Healthy
+MI1DHealthyAllDEG <- FindMarkers(integrated, ident.1 = "Adult Healthy", ident.2 = "Adult MI1D", min.pct = 0.25, verbose = FALSE)
+write.csv(MI1DHealthyAllDEG, file = "AdultMI1D_AdultHealthy_AllDEG.csv")
+### top 50
+## downregulated in Adult MI1D
+MI1DHealthyAllDEG_down <- MI1DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+MI1DHealthyAllDEG_top50_down <- MI1DHealthyAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI1DHealthyAllDEG_top50_down, file = "top50_downregulated_AdultMI1DHealthyAllDEG.csv")
+View(MI1DHealthyAllDEG_top50_down)
+## upregulated in Adult MI1D
+MI1DHealthyAllDEG_up <- MI1DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+MI1DHealthyAllDEG_top50_up <- MI1DHealthyAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI1DHealthyAllDEG_top50_up, file = "top50_upregulated_AdultMI1DHealthyAllDEG.csv")
+View(MI1DHealthyAllDEG_top50_up)
+
+# Adult MI3D vs Adult Healthy
+MI3DHealthyAllDEG <- FindMarkers(integrated, ident.1 = "Adult Healthy", ident.2 = "Adult MI3D", min.pct = 0.25, verbose = FALSE)
+write.csv(MI3DHealthyAllDEG, file = "AdultMI3D_AdultHealthy_AllDEG.csv")
+### top 50
+## downregulated in Adult MI3D
+MI3DHealthyAllDEG_down <- MI3DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+MI3DHealthyAllDEG_top50_down <- MI3DHealthyAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI3DHealthyAllDEG_top50_down, file = "top50_downregulated_AdultMI3DHealthyAllDEG.csv")
+View(MI3DHealthyAllDEG_top50_down)
+## upregulated in Adult MI3D
+MI3DHealthyAllDEG_up <- MI3DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+MI3DHealthyAllDEG_top50_up <- MI3DHealthyAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI3DHealthyAllDEG_top50_up, file = "top50_upregulated_AdultMI3DHealthyAllDEG.csv")
+View(MI3DHealthyAllDEG_top50_up)
+
+# Adult MI7D vs Adult Healthy
+MI7DHealthyAllDEG <- FindMarkers(integrated, ident.1 = "Adult Healthy", ident.2 = "Adult MI7D", min.pct = 0.25, verbose = FALSE)
+write.csv(MI7DHealthyAllDEG, file = "AdultMI7D_AdultHealthy_AllDEG.csv")
+### top 50
+## downregulated in Adult MI7D
+MI7DHealthyAllDEG_down <- MI7DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+MI7DHealthyAllDEG_top50_down <- MI7DHealthyAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI7DHealthyAllDEG_top50_down, file = "top50_downregulated_AdultMI7DHealthyAllDEG.csv")
+View(MI7DHealthyAllDEG_top50_down)
+## upregulated in Adult MI7D
+MI7DHealthyAllDEG_up <- MI7DHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+MI7DHealthyAllDEG_top50_up <- MI7DHealthyAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI7DHealthyAllDEG_top50_up, file = "top50_upregulated_AdultMI7DHealthyAllDEG.csv")
+View(MI7DHealthyAllDEG_top50_up)
+
+# Adult MI2W vs Adult Healthy
+MI2WHealthyAllDEG <- FindMarkers(integrated, ident.1 = "Adult Healthy", ident.2 = "Adult MI2W", min.pct = 0.25, verbose = FALSE)
+write.csv(MI2WHealthyAllDEG, file = "AdultMI2W_AdultHealthy_AllDEG.csv")
+### top 50
+## downregulated in Adult MI2W
+MI2WHealthyAllDEG_down <- MI2WHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+MI2WHealthyAllDEG_top50_down <- MI2WHealthyAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI2WHealthyAllDEG_top50_down, file = "top50_downregulated_AdultMI2WHealthyAllDEG.csv")
+View(MI2WHealthyAllDEG_top50_down)
+## upregulated in Adult MI2W
+MI2WHealthyAllDEG_up <- MI2WHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+MI2WHealthyAllDEG_top50_up <- MI2WHealthyAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI2WHealthyAllDEG_top50_up, file = "top50_upregulated_AdultMI2WHealthyAllDEG.csv")
+View(MI2WHealthyAllDEG_top50_up)
+
+# Adult MI4W vs Adult Healthy
+MI4WHealthyAllDEG <- FindMarkers(integrated, ident.1 = "Adult Healthy", ident.2 = "Adult MI4W", min.pct = 0.25, verbose = FALSE)
+write.csv(MI4WHealthyAllDEG, file = "AdultMI4W_AdultHealthy_AllDEG.csv")
+### top 50
+## downregulated in Adult MI4W
+MI4WHealthyAllDEG_down <- MI4WHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+MI4WHealthyAllDEG_top50_down <- MI4WHealthyAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI4WHealthyAllDEG_top50_down, file = "top50_downregulated_AdultMI4WHealthyAllDEG.csv")
+View(MI4WHealthyAllDEG_top50_down)
+## upregulated in Adult MI4W
+MI4WHealthyAllDEG_up <- MI4WHealthyAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+MI4WHealthyAllDEG_top50_up <- MI4WHealthyAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(MI4WHealthyAllDEG_top50_up, file = "top50_upregulated_AdultMI4WHealthyAllDEG.csv")
+View(MI4WHealthyAllDEG_top50_up)
+
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+library(systemPipeR)
+
+common_down <- Reduce(intersect, list(rownames(MI1DHealthyAllDEG_down), rownames(MI3DHealthyAllDEG_down), rownames(MI7DHealthyAllDEG_down),  rownames(MI2WHealthyAllDEG_down), rownames(MI4WHealthyAllDEG_down)))
+
+x1 <- list(
+  A = rownames(MI1DHealthyAllDEG_down),
+  B = rownames(MI3DHealthyAllDEG_down),
+  C = rownames(MI7DHealthyAllDEG_down),
+  D = rownames(MI2WHealthyAllDEG_down)#,
+  #E = MI4WHealthyAllDEG_down
+  )
+p1 <- ggVennDiagram(x1, label_alpha = 0)
+
+vennset <- overLapper(x1, type = "vennsets")
+p1 <- vennPlot(vennset)
+
+## Compare HealthyInjuredAllDEG_up with P6P2MI3WAllDEG_up
+common_up <- Reduce(intersect, list(rownames(MI1DHealthyAllDEG_up), rownames(MI3DHealthyAllDEG_up), rownames(MI7DHealthyAllDEG_up),  rownames(MI2WHealthyAllDEG_up), rownames(MI4WHealthyAllDEG_up)))
+
+x2 <- list(
+  A = rownames(MI1DHealthyAllDEG_up),
+  B = rownames(MI3DHealthyAllDEG_up),
+  C = rownames(MI7DHealthyAllDEG_up),
+  D = rownames(MI2WHealthyAllDEG_up)#,
+  #E = MI4WHealthyAllDEG_up
+  )
+p2 <- ggVennDiagram(x2, label_alpha = 0)
+```
+</div>
