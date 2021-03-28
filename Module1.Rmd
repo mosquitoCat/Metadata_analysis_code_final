@@ -58,6 +58,7 @@ library(viper)
 library(dorothea)
 library(heatmaply)
 library(systemPipeR)
+library(scrat)
 ```
 </div>
 
@@ -1546,6 +1547,32 @@ levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D"
 DefaultAssay(integrated) <- "dorothea"
 
 ####################
+## P10 vs P6
+####################
+# study all cells first
+P6P10AllDER <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P10 Healthy", min.pct = 0.25, verbose = FALSE)
+write.csv(P6P10AllDER, file = "P6P10AllDER.csv")
+
+# top 50
+## downregulated in P6
+P6P10AllDER_down <- P6P10AllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(P6P10AllDER_down, file = "downregulated_P6P10AllDER.csv")
+P6P10AllDER_top50_down <- P6P10AllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(P6P10AllDER_top50_down)
+## upregulated in P6
+P6P10AllDER_up <- P6P10AllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(P6P10AllDER_up, file = "upregulated_P6P10AllDER.csv")
+P6P10AllDER_top50_up <- P6P10AllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(P6P10AllDER_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(P6P10AllDER_top50_up)[1:10]
+feature_down <- rownames(P6P10AllDER_top50_down) [1:10]
+
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P10"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P10"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+####################
 ## P2 MI3W vs P6
 ####################
 # study all cells first
@@ -1750,5 +1777,80 @@ olBarplot(vennset2, mincount=1)
 ## plot the common DERs
 DotPlot(integrated, features = c(common_up, common_down), group.by = "group", cols = c("Navy", "plum1")) + theme(axis.text.x = element_text(angle = 45, hjust = 1, family = "Open Sans"))
 ggsave("Dotplot_common_up_and_down_allinjured_DER.png", dpi = 300, height = 4, width = 7, units = "in")
+```
+</div>
+
+### Step 18: Module 1d DER between P6 vs P10 and P6 vs P2 3WMI
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+<div class = "teal">
+```{r Module 1d DER between P6 vs P10 and P6 vs P2 3WMI, message = FALSE, warning = FALSE}
+common_down <- Reduce(intersect, list(rownames(P6P2MI3WAllDER_down), rownames(P6P10AllDER_down)))
+common_up <- Reduce(intersect, list(rownames(P6P2MI3WAllDER_up), rownames(P6P10AllDER_up)))
+# this is not informative because P2 3WMI is similar to P10 in terms of cell maturation and differentiation and the similarity in genes/regulon expression doesn't mean much to proliferation or regeneration
+```
+</div>
+
+### Step 19: Scrat metagene analysis
+
+colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
+
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+
+<div class = "teal">
+```{r Scrat metagene analysis, message = FALSE, warning = FALSE}
+### use integrated data
+DefaultAssay(integrated) <- "RNA"
+df1 <- as.data.frame(t(as.matrix(integrated@assays$RNA@data)))
+#save(df1, file = "data_for_scrat.RData")
+write.csv(df1, file = "data_for_scrat.csv")
+integrated@meta.data <- integrated@meta.data %>% mutate(color = case_when(group == "P6 Healthy" ~ "#bfbfff", group == "P10 Healthy" ~ "#7879ff", group == "P2 MI3W" ~ "#dc1c13", group == "Adult Healthy" ~ "#0000ff", group == "Adult MI1D" ~ "#f6bdc0", group == "Adult MI3D" ~ "#f1959b", group == "Adult MI7D" ~ "#f07470", group == "Adult MI2W" ~ "#ea4c46", group == "Adult MI4W" ~ "darkred"))
+df2 <- data.frame(cell_id = rownames(df1), experiment = "Mouse_Meta", assignment_LB = integrated@meta.data$group, color = integrated@meta.data$color, row.names = rownames(df1))
+dfFinal <- cbind(df2, df1)
+dfFinal[1:5, 1:5] # check the input is ready
+# Assign groups and colors
+SOM.assign <- as.character(dfFinal$assignment_LB)
+SOM.color <- as.character(dfFinal$color)
+
+dfFinal <- t(dfFinal) 
+# Set up the environment
+env <- scrat.new(list(dataset.name = "mouse_meta",
+                      dim.1stLvlSom = 50,
+                      dim.2ndLvlSom = 20,
+                      training.extension = 1,
+                      rotate.SOM.portraits = 0,
+                      flip.SOM.portraits = F,
+                      database.dataset = "mmusculus_gene_ensembl",
+                      database.id.type = "mgi_symbol",
+                      geneset.analysis = T,
+                      geneset.analysis.exact = F,
+                      spot.coresize.modules = 3,
+                      spot.threshold.modules = 0.95,
+                      spot.coresize.groupmap = 5,
+                      spot.threshold.groupmap = 0.75,
+                      pseudotime.estimation = list(
+                              n.waypoints = 20,
+                              n.iterations = 20,
+                              k = 30,
+                              I = 5,
+                              initiator.sample = "Adult Healthy"),
+                      feature.centralization = T,
+                      sample.quantile.normalization = T,
+                      pairwise.comparison.list = list()))
+# env setup nicely done
+# Load input datainto environment
+env$indata <- dfFinal # check
+# Define sample groups
+env$group.labels <- SOM.assign
+#env$group.labels <-"auto"
+# Define sample colors(optional)
+env$group.colors <- SOM.color # check
+#env$group.colors<-c("col1","col2",...)[match(env$group.labels, unique(env$group.labels))
+# Pipeline execution
+scrat.run(env) # for HTTP error just load the Biomart library
+# the pipeline is successful with the counts data
 ```
 </div>
