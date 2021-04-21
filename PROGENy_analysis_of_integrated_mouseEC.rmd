@@ -1,0 +1,116 @@
+---
+title: "PROGENy_analysis_of_integrated_mouseEC"
+author: "Ziwen Li"
+date: "21/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+# PROGENy analysis of integrated mouse endothelial cells
+
+Conventional pathway analysis methods rely on the gene expression of the pathway members. However, it overlooks the effect of post-translational modifications and only captures very specific experimental conditions. To overcome these limitations, PROGENy (Pathway RespOnsive GENes) estimates the activities of relevant signalling pathways based on consensus gene signatures obtained from perturbation experiments, in the other words, the footprint of the pathway on gene expression. (Schubert et al. 2018 ,Dugourd and Saez-Rodriguez (2019)
+# PROGENy currently contain 14 pathways for both human and mouse data (Holland, Szalai, and Saez-Rodriguez 2019).
+
+PROGENy currently contain 14 pathways for both human and mouse data (Holland, Szalai, and Saez-Rodriguez 2019).
+
+This vignette shows how to apply PROGENy to the integrated mouse endothelial cell scRNA-seq data object generated for the meta-analysis paper.
+
+## Step 1 Load the library
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+library(progeny)
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(tidyr)
+library(readr)
+library(pheatmap)
+library(tibble)
+library(tidyverse)
+```
+</div>
+
+## Step 2 load the object
+
+I used the pre-integrated mouse EC object "integrated".
+
+<div class = "teal">
+```{r object_loading, message = FALSE, warning = FALSE}
+integrated <- readRDS("integrated.rds")
+# the following two lines are very important especially if you come from datasets integration
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+```
+</div>
+
+## Step 3 pathway activity per group
+
+<div class = "teal">
+```{r pathway_activity_inferencing, message = FALSE, warning = FALSE}
+# prepare cell group data frame
+cellgroups <- data.frame(cell = names(Idents(integrated)),
+                         cellgroup = as.character(Idents(integrated)),
+                         stringsAsFactors = FALSE)
+
+# compute the PROGENy activity scores and add to the Seurat object as a new assay called PROGENy - this step is very similar to Dorothea for regulon
+# this step is very fast
+integrated <- progeny(integrated, scale = FALSE, organism = "Mouse", top = 500, perm = 1, return_assay = TRUE)
+saveRDS(integrated, file = "integrated.rds")
+
+# directly apply suerat functions to the PROGENy scores
+integrated <- Seurat::ScaleData(integrated, assay = "progeny")
+
+# save the progeny assay into a separate data frame to apply further analysis
+progeny_scores_df <- as.data.frame(t(GetAssayData(integrated, slot = "scale.data", assay = "progeny"))) %>%
+  rownames_to_column("cell") %>%
+  gather(Pathway, Activity, -cell)
+
+# add group information to progeny data frame
+progeny_scores_df <- inner_join(progeny_scores_df, cellgroups)
+head(progeny_scores_df)
+
+# summarise the progeny scores by cell group
+summarise_progeny_scores <- progeny_scores_df %>%
+  group_by(Pathway, cellgroup) %>%
+  summarise(avg = mean(Activity), std = sd(Activity))
+head(summarise_progeny_scores)
+
+# prepare the data for plot
+summarise_progeny_scores_df <- summarise_progeny_scores %>%
+  dplyr::select(-std) %>%
+  spread(Pathway, avg) %>%
+  data.frame(row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+head(summarise_progeny_scores_df)
+
+# generate plot
+## original plot
+paletteLength = 100
+myColor = colorRampPalette(c("Darkblue", "white", "red"))(paletteLength)
+
+progenyBreaks = c(seq(min(summarise_progeny_scores_df), 0, 
+                      length.out=ceiling(paletteLength/2) + 1),
+                  seq(max(summarise_progeny_scores_df)/paletteLength, 
+                      max(summarise_progeny_scores_df), 
+                      length.out=floor(paletteLength/2)))
+progeny_hmap = pheatmap(summarise_progeny_scores_df[,-1],fontsize=12, 
+                        fontsize_row = 10, 
+                        color=myColor, breaks = progenyBreaks, 
+                        main = "PROGENy pathway", angle_col = 45,
+                        treeheight_col = 0,  border_color = NA)
+## my plot
+progeny_hmap = pheatmap(summarise_progeny_scores_df[,-1],fontsize=12, 
+                        fontsize_row = 10, 
+                         color=viridisLite::inferno(20), 
+                         main = "PROGENy pathway", angle_col = 45,
+                         treeheight_col = 0,  border_color = "white")
+```
+</div>
