@@ -112,5 +112,15 @@ progeny_hmap = pheatmap(summarise_progeny_scores_df[,-1],fontsize=12,
                          color=viridisLite::inferno(20), 
                          main = "PROGENy pathway", angle_col = 45,
                          treeheight_col = 0,  border_color = "white")
+
+## heatmap with no clustering
+new_summary <- summarise_progeny_scores_df[,-1]
+new_summary1 <- new_summary[c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"), ]
+progeny_hmap = pheatmap(new_summary1,fontsize=12, 
+                        fontsize_row = 10, 
+                         color=viridisLite::viridis(20), 
+                         main = "PROGENy pathway", angle_col = 90,
+                         treeheight_col = 0,  border_color = "white",
+                        cluster_rows=FALSE, cluster_cols=FALSE)
 ```
 </div>
