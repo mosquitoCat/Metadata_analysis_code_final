@@ -1,5 +1,5 @@
 ---
-title: "PROGENy_analysis_of_integrated_mouseEC"
+title: "PROGENy_analysis_of_combined_mouseEC"
 author: "Ziwen Li"
 date: "21/04/2021"
 output: html_document
@@ -14,14 +14,14 @@ div.teal pre { background-color:#fff44f; }
 div.teal pre.r { background-color:#b2d8d8; }
 </style>
 
-# PROGENy analysis of integrated mouse endothelial cells
+# PROGENy analysis of combined mouse endothelial cells
 
 Conventional pathway analysis methods rely on the gene expression of the pathway members. However, it overlooks the effect of post-translational modifications and only captures very specific experimental conditions. To overcome these limitations, PROGENy (Pathway RespOnsive GENes) estimates the activities of relevant signalling pathways based on consensus gene signatures obtained from perturbation experiments, in the other words, the footprint of the pathway on gene expression. (Schubert et al. 2018 ,Dugourd and Saez-Rodriguez (2019)
 # PROGENy currently contain 14 pathways for both human and mouse data (Holland, Szalai, and Saez-Rodriguez 2019).
 
 PROGENy currently contain 14 pathways for both human and mouse data (Holland, Szalai, and Saez-Rodriguez 2019).
 
-This vignette shows how to apply PROGENy to the integrated mouse endothelial cell scRNA-seq data object generated for the meta-analysis paper.
+This vignette shows how to apply PROGENy to the combined mouse endothelial cell scRNA-seq data object generated for the meta-analysis paper.
 
 ## Step 1 Load the library
 
@@ -41,15 +41,14 @@ library(tidyverse)
 
 ## Step 2 load the object
 
-I used the pre-integrated mouse EC object "integrated".
+I used the pre-combined mouse EC object "combined".
 
 <div class = "teal">
 ```{r object_loading, message = FALSE, warning = FALSE}
-integrated <- readRDS("integrated.rds")
+combined <- readRDS("combined.rds")
 # the following two lines are very important especially if you come from datasets integration
-DefaultAssay(integrated) <- "RNA"
-integrated <- NormalizeData(integrated)
-integrated@meta.data <- integrated@meta.data %>% mutate(paperID = case_when(group == "P6 Healthy" ~ "uninjured P6", group == "P10 Healthy" ~ "uninjured P10", group == "Adult Healthy" ~ "uninjured adult", group == "P2 MI3W" ~ "P2 MI21D", group == "Adult MI1D" ~ "Adult MI1D", group == "Adult MI3D" ~ "Adult MI3D", group == "Adult MI7D" ~ "Adult MI7D", group == "Adult MI2W" ~ "Adult MI14D", group == "Adult MI4W" ~ "Adult MI28D"))
+DefaultAssay(combined) <- "RNA"
+combined <- NormalizeData(combined)
 ```
 </div>
 
@@ -58,20 +57,21 @@ integrated@meta.data <- integrated@meta.data %>% mutate(paperID = case_when(grou
 <div class = "teal">
 ```{r pathway_activity_inferencing, message = FALSE, warning = FALSE}
 # prepare cell group data frame
-cellgroups <- data.frame(cell = names(Idents(integrated)),
-                         cellgroup = as.character(Idents(integrated)),
+Idents(combined) <- "newgroup"
+cellgroups <- data.frame(cell = names(Idents(combined)),
+                         cellgroup = as.character(Idents(combined)),
                          stringsAsFactors = FALSE)
 
 # compute the PROGENy activity scores and add to the Seurat object as a new assay called PROGENy - this step is very similar to Dorothea for regulon
 # this step is very fast
-integrated <- progeny(integrated, scale = FALSE, organism = "Mouse", top = 500, perm = 1, return_assay = TRUE)
-saveRDS(integrated, file = "integrated.rds")
+combined <- progeny(combined, scale = FALSE, organism = "Mouse", top = 500, perm = 1, return_assay = TRUE)
+saveRDS(combined, file = "combined.rds")
 
 # directly apply suerat functions to the PROGENy scores
-integrated <- Seurat::ScaleData(integrated, assay = "progeny")
+combined <- Seurat::ScaleData(combined, assay = "progeny")
 
 # save the progeny assay into a separate data frame to apply further analysis
-progeny_scores_df <- as.data.frame(t(GetAssayData(integrated, slot = "scale.data", assay = "progeny"))) %>%
+progeny_scores_df <- as.data.frame(t(GetAssayData(combined, slot = "scale.data", assay = "progeny"))) %>%
   rownames_to_column("cell") %>%
   gather(Pathway, Activity, -cell)
 
@@ -108,18 +108,11 @@ progeny_hmap = pheatmap(summarise_progeny_scores_df[,-1],fontsize=12,
                         main = "PROGENy pathway", angle_col = 45,
                         treeheight_col = 0,  border_color = NA)
 ## my plot
-progeny_hmap = pheatmap(t(summarise_progeny_scores_df),fontsize=12, 
-                        fontsize_row = 10, 
-                         color=viridisLite::magma(20), 
-                         main = "PROGENy pathway", angle_col = 45,
-                         treeheight_col = 10,  border_color = "white")
-
-progeny_hmap = pheatmap(summarise_progeny_scores_df,fontsize=14, 
-                        fontsize_row = 14, 
-                         color=viridisLite::cividis(20), angle_col = 45,
-                         treeheight_col = 15, treeheight_row = 30, border_color = "white",
-                        display_numbers = TRUE, number_color = "white")
-progeny_hmap
+progeny_hmap = pheatmap(summarise_progeny_scores_df,fontsize=12, 
+                        fontsize_row = 12, 
+                         color=viridisLite::inferno(20), 
+                         main = "", angle_col = 45,
+                         treeheight_col = 0, treeheight_row = 20, border_color = "white")
 
 ## heatmap with no clustering
 new_summary <- summarise_progeny_scores_df[,-1]

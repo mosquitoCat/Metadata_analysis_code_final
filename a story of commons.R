@@ -8,6 +8,8 @@ save(Mouse_InjuredVSUninjuredAllDEG_up, file = "Mouse_InjuredVSUninjuredAllDEG_u
 common_up <- intersect(human_InjuredVSUninjuredAllDEG_up, Mouse_InjuredVSUninjuredAllDEG_up)
 common_up_for_human <- unique(homologene(common_up, inTax = 10090, outTax = 9606) [, 2])
 save(common_up, file = "common_upregulated_DEG_in_injured_compared_to_uninjured_between_MandH.RData")
+uniquehuman_up <- human_InjuredVSUninjuredAllDEG_up[human_InjuredVSUninjuredAllDEG_up %!in% common_up]
+uniquemosue_up <- Mouse_InjuredVSUninjuredAllDEG_up[Mouse_InjuredVSUninjuredAllDEG_up %!in% common_up]
 
 # Common down genes between Injured_vs_Uninjured human and mouse
 human_InjuredVSUninjuredAllDEG_down <- homologene(AllDEG_down$X, inTax = 9606, outTax = 10090) [, 2]
@@ -17,6 +19,8 @@ save(Mouse_InjuredVSUninjuredAllDEG_down, file = "Mouse_InjuredVSUninjuredAllDEG
 common_down <- intersect(human_InjuredVSUninjuredAllDEG_down, Mouse_InjuredVSUninjuredAllDEG_down)
 common_down_for_human <- unique(homologene(common_down, inTax = 10090, outTax = 9606) [, 2])
 save(common_down, file = "common_downregulated_DEG_in_injured_compared_to_uninjured_between_MandH.RData")
+uniquehuman_down <- human_InjuredVSUninjuredAllDEG_down[human_InjuredVSUninjuredAllDEG_down %!in% common_down]
+uniquemosue_down <- Mouse_InjuredVSUninjuredAllDEG_down[Mouse_InjuredVSUninjuredAllDEG_down %!in% common_down]
 
 # Common up regulons between Injured_vs_Uninjured human and mouse
 ## human - UninjuredInjuredAllDER_up
@@ -27,6 +31,9 @@ save(Mouse_UninjuredInjuredAllDER_up, file = "Mouse_UninjuredInjuredAllDER_up.RD
 common_up <- intersect(human_UninjuredInjuredAllDER_up, Mouse_UninjuredInjuredAllDER_up)
 save(common_up, file = "common_upregulated_DER_in_injured_compared_to_uninjured_between_MandH.RData")
 
+uniquehuman_up <- human_UninjuredInjuredAllDER_up[human_UninjuredInjuredAllDER_up %!in% common_up]
+uniquemosue_up <- Mouse_UninjuredInjuredAllDER_up[Mouse_UninjuredInjuredAllDER_up %!in% common_up]
+
 # Common down regulons between Injured_vs_Uninjured human and mouse
 ## human - UninjuredInjuredAllDER_down
 human_UninjuredInjuredAllDER_down <- homologene(UninjuredInjuredAllDER_down$X, inTax = 9606, outTax = 10090)[, 2]
@@ -35,6 +42,10 @@ Mouse_UninjuredInjuredAllDER_down <- rownames(AllDER_down)
 save(Mouse_UninjuredInjuredAllDER_down, file = "Mouse_UninjuredInjuredAllDER_down.RData")
 common_down <- intersect(human_UninjuredInjuredAllDER_down, Mouse_UninjuredInjuredAllDER_down)
 save(common_down, file = "common_downregulated_DER_in_injured_compared_to_uninjured_between_MandH.RData")
+
+uniquehuman_down <- human_UninjuredInjuredAllDER_down[human_UninjuredInjuredAllDER_down %!in% common_down]
+uniquemosue_down <- Mouse_UninjuredInjuredAllDER_down[Mouse_UninjuredInjuredAllDER_down %!in% common_down]
+
 
 # rownames(integrated)
 new_human_gene_names <- homologene(rownames(integrated), inTax = 9606, outTax = 10090) [, 2]

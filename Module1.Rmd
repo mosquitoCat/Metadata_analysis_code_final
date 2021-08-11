@@ -59,6 +59,7 @@ library(dorothea)
 library(heatmaply)
 library(systemPipeR)
 library(scrat)
+library(dichromat)
 ```
 </div>
 
@@ -377,6 +378,10 @@ further <- distinct(colourbuilt)
 further <- further[order(further$group), ]
 further.colour <- further$colour
 
+# [1] "#F8766D" "#E58700" "#C99800" "#A3A500" "#6BB100"
+# [6] "#00BA38" "#00BF7D" "#00C0AF" "#00BCD8" "#00B0F6"
+# [11] "#619CFF" "#B983FF" "#E76BF3" "#FD61D1" "#FF67A4"
+
 # coloured by cluster
 df <- df %>% dplyr::mutate (cluster = integrated@meta.data$seurat_clusters)
 p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ cluster, colors = further.colour, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
@@ -536,12 +541,68 @@ write.csv(AllDEG_top50_up, file = "top50_upregulated_DEG_condition.csv")
 
 # plot up and down regulated genes
 Idents(integrated) <- "seurat_clusters"
-feature_up <- rownames(AllDEG_top50_up)[1:10]
-feature_down <- rownames(AllDEG_top50_down) [1:10]
+feature_up <- rownames(AllDEG_top50_up)[1:50]
+feature_down <- rownames(AllDEG_top50_down) [1:50]
 
 p1 <- VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
 p2 <- VlnPlot(integrated, features = feature_down, pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
 p3 <- VlnPlot(integrated, features = c(feature_up, feature_down), pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+
+#########################################
+#########################################
+# 04052021 change "Normal" to "Uninjured"
+integrated@meta.data <- integrated@meta.data %>% mutate(condition = case_when(condition == "Normal" ~ "Uninjured", condition == "Injured" ~ "Injured"))
+saveRDS(integrated, file = "integrated.rds")
+VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "condition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+
+# try remake the datafrme to using a different plotting package
+gene_expression <- as.data.frame(t(integrated@assays$RNA@data[feature_up, ]))
+#gene_expression <- as.data.frame(t(integrated@assays$RNA@data[feature_down, ]))
+cell_metadata <- integrated@meta.data$condition
+cell_embedding <- integrated@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+new_dataframe$cell_metadata <- factor(cell_metadata, levels = c("Uninjured", "Injured"))
+## use the new_dataframe to plot
+
+fig <- new_dataframe %>%
+  plot_ly(
+    x = ~ cell_metadata,
+    y = ~ Btg1,
+    type = 'violin',
+    color = ~ cell_metadata,
+    colors = c("blue", "red"),
+    box = list(
+      visible = T
+    ),
+    meanline = list(
+      visible = T
+    )
+  ) 
+
+fig <- fig %>%
+  layout(
+    title = "Btg1",
+    yaxis = list(
+      title = "",
+      zeroline = F
+    ),
+    xaxis = list(
+      title = ""
+    ),
+    showlegend = FALSE,
+    font = list(
+      #family = "Open Sans",
+      size = 16),
+    margin = list(t = 50, l = 10)
+  )
+
+fig
+
+# uninjured
+p1 <- plot_ly(data = new_dataframe[cell_metadata == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Selenok, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# injured
+p2 <- plot_ly(data = new_dataframe[cell_metadata == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Selenok, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
 ```
 </div>
 
@@ -755,7 +816,7 @@ VlnPlot(proliferate, features = c("2700094K13Rik", "Stmn1"), pt.size = 0, split.
 
 healthy P6 vs 3WMI P2 – (Biological question: what are the genes associated with postnatal regeneration?)
 
-levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W")
 
 colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
 
@@ -1489,10 +1550,10 @@ ggsave("cluster_specific_tf.png", width = 5, height = 5)
 
 ## We transform Viper scores, scaled by seurat, into a data frame to better 
 ## handling the results
-viper_scores_df <- GetAssayData(integrated, slot = "scale.data", assay = "dorothea") %>% data.frame(check.names = F) %>% t()
+viper_scores_df <- GetAssayData(integrated, slot = "data", assay = "dorothea") %>% data.frame(check.names = F) %>% t()
 
 ## We create a data frame containing the cells and their groups
-Idents(integrated) <- "group"
+Idents(integrated) <- "paperID"
 CellsClusters <- data.frame(cell = names(Idents(integrated)), 
                             cell_type = as.character(Idents(integrated)),
                             check.names = F)
@@ -1531,6 +1592,18 @@ summarized_viper_scores_df <- summarized_viper_scores %>%
 png("viper_heatmap.png", res = 300, width = 2500, height = 800)
 ggheatmap(summarized_viper_scores_df, show_dendrogram = c(TRUE, FALSE))
 dev.off()
+
+progeny_hmap = pheatmap(summarized_viper_scores_df,fontsize=14, 
+                        fontsize_row = 14, 
+                         color=viridisLite::viridis(20), angle_col = 45,
+                         treeheight_col = 40, treeheight_row = 40, border_color = "white",
+                        display_numbers = TRUE, number_color = "white")
+
+progeny_hmap = pheatmap(summarized_viper_scores_df,fontsize=14, 
+                        fontsize_row = 14, 
+                         color=viridisLite::viridis(20), angle_col = 45,
+                         treeheight_col = 40, treeheight_row = 40, border_color = "white",
+                        display_numbers = FALSE, number_color = "white")
 ```
 </div>
 
@@ -1576,20 +1649,25 @@ p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by 
 ## P2 MI3W vs P6
 ####################
 # study all cells first
-P6P2MI3WAllDER <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P2 MI3W", min.pct = 0.25, verbose = FALSE)
+#P6P2MI3WAllDER <- FindMarkers(integrated, ident.1 = "P6 Healthy", ident.2 = "P2 MI3W", min.pct = 0.25, verbose = FALSE)
+Idents(integrated) <- "paperID"
+P6P2MI3WAllDER <- FindMarkers(integrated, ident.1 = "P2 MI21D", ident.2 = "uninjured P6", min.pct = 0.25, verbose = FALSE)
 write.csv(P6P2MI3WAllDER, file = "P6P2MI3WAllDER.csv")
 
 # top 50
-## downregulated in P6
-P6P2MI3WAllDER_down <- P6P2MI3WAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+## downregulated in P2 MI21D
+P6P2MI3WAllDER_down <- P6P2MI3WAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0) %>% top_n(n = 500, wt = abs(avg_log2FC))
 write.csv(P6P2MI3WAllDER_down, file = "downregulated_P6P2MI3WAllDER.csv")
 P6P2MI3WAllDER_top50_down <- P6P2MI3WAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
-View(P6P2MI3WAllDER_top50_down)
-## upregulated in P6
-P6P2MI3WAllDER_up <- P6P2MI3WAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+#View(P6P2MI3WAllDER_top50_down)
+write.csv(P6P2MI3WAllDER_top50_down, file = "top50_downregulated_P6P2MI3WAllDER.csv")
+
+## upregulated in P2 MI21D
+P6P2MI3WAllDER_up <- P6P2MI3WAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0) %>% top_n(n = 500, wt = abs(avg_log2FC))
 write.csv(P6P2MI3WAllDER_up, file = "upregulated_P6P2MI3WAllDER.csv")
 P6P2MI3WAllDER_top50_up <- P6P2MI3WAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
-View(P6P2MI3WAllDER_top50_up)
+#View(P6P2MI3WAllDER_top50_up)
+write.csv(P6P2MI3WAllDER_top50_up, file = "top50_upregulated_P6P2MI3WAllDER.csv")
 
 # plot up and down regulated genes
 feature_up <- rownames(P6P2MI3WAllDER_top50_up)[1:10]
@@ -1597,6 +1675,28 @@ feature_down <- rownames(P6P2MI3WAllDER_top50_down) [1:10]
 
 p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P2 MI3W"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
 p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "detailedage", idents = c("P6 Healthy", "P2 MI3W"), ncol = 6, cols = c("#dc1c13", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+##############################
+## Adult MI vs Adult Healthy
+##############################
+Idents(integrated) <- "newgroup"
+
+AdultInjuredVSUninjuredAllDER <- FindMarkers(integrated, ident.1 = "Adult Injured", ident.2 = "Adult Normal", min.pct = 0.25, verbose = FALSE)
+write.csv(AdultInjuredVSUninjuredAllDER, file = "Adult_InjuredVSUninjured_AllDER.csv")
+
+## Upegulated in injured
+AdultInjuredVSUninjuredAllDER_up <- AdultInjuredVSUninjuredAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(AdultInjuredVSUninjuredAllDER_up, file = "up_Adult_Injured_VS_Uninjured_DER.csv")
+AdultInjuredVSUninjuredAllDER_top50_up <- AdultInjuredVSUninjuredAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(AdultInjuredVSUninjuredAllDER_top50_up)
+write.csv(AdultInjuredVSUninjuredAllDER_top50_up, file = "top50_up_Adult_Injured_VS_Uninjured_DER.csv")
+
+## Downegulated in injured
+AdultInjuredVSUninjuredAllDER_down <- AdultInjuredVSUninjuredAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(AdultInjuredVSUninjuredAllDER_down, file = "down_Adult_Injured_VS_Uninjured_DER.csv")
+AdultInjuredVSUninjuredAllDER_top50_down <- AdultInjuredVSUninjuredAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(AdultInjuredVSUninjuredAllDER_top50_down)
+write.csv(AdultInjuredVSUninjuredAllDER_top50_down, file = "top50_down_Adult_Injured_VS_Uninjured_DER.csv")
 
 ##############################
 ## Adult MI1D vs Adult Healthy
@@ -1798,24 +1898,27 @@ common_up <- Reduce(intersect, list(rownames(P6P2MI3WAllDER_up), rownames(P6P10A
 
 colours = c ("#bfbfff", "#7879ff", "#dc1c13", "#0000ff", "#f6bdc0", "#f1959b", "#f07470", "#ea4c46", "darkred")
 
-levels = c("P6 Healthy", "P10 Healthy", "P2 MI3W", "Adult Healthy", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
+levels = c("Uninjured P6", "Uninjured P10", "P2 MI3W", "Uninjured dult", "Adult MI1D", "Adult MI3D", "Adult MI7D", "Adult MI2W", "Adult MI4W"))
 
 <div class = "teal">
 ```{r Scrat metagene analysis, message = FALSE, warning = FALSE}
 ### use integrated data
 DefaultAssay(integrated) <- "RNA"
-df1 <- as.data.frame(t(as.matrix(integrated@assays$RNA@data)))
-#save(df1, file = "data_for_scrat.RData")
-write.csv(df1, file = "data_for_scrat.csv")
+df <- as.matrix(integrated@assays$RNA@data)
+df1 <- as.data.frame(t(df))
+save(df1, file = "data_for_scrat.RData")
+
 integrated@meta.data <- integrated@meta.data %>% mutate(color = case_when(group == "P6 Healthy" ~ "#bfbfff", group == "P10 Healthy" ~ "#7879ff", group == "P2 MI3W" ~ "#dc1c13", group == "Adult Healthy" ~ "#0000ff", group == "Adult MI1D" ~ "#f6bdc0", group == "Adult MI3D" ~ "#f1959b", group == "Adult MI7D" ~ "#f07470", group == "Adult MI2W" ~ "#ea4c46", group == "Adult MI4W" ~ "darkred"))
 df2 <- data.frame(cell_id = rownames(df1), experiment = "Mouse_Meta", assignment_LB = integrated@meta.data$group, color = integrated@meta.data$color, row.names = rownames(df1))
 dfFinal <- cbind(df2, df1)
 dfFinal[1:5, 1:5] # check the input is ready
+save(dfFinal, file = "dfFinal.RData")
 # Assign groups and colors
 SOM.assign <- as.character(dfFinal$assignment_LB)
 SOM.color <- as.character(dfFinal$color)
 
 dfFinal <- t(dfFinal) 
+#save(dfFinal, file = "dfFinal_for_scrat.RData")
 # Set up the environment
 env <- scrat.new(list(dataset.name = "mouse_meta",
                       dim.1stLvlSom = 50,
@@ -1852,5 +1955,87 @@ env$group.colors <- SOM.color # check
 # Pipeline execution
 scrat.run(env) # for HTTP error just load the Biomart library
 # the pipeline is successful with the counts data
+```
+</div>
+
+### Step 20: Check mouse genes in human data
+
+<div class = "teal">
+```{r checking genes, message = FALSE, warning = FALSE}
+list_to_check <- c("Sox18", "Rbpms", "Rpl3", "Hspa8", "Rps28", "Nedd9", "Cdh13", "Slc25a4", "Rpl6", "H2afj", "H2-D1", "Nptn", "Gm26917", "Wwc2", "Prkch", "Eef1g", "Ube2k", "Tsc22d3", "Rps6", "Rpl10a", "Gpi1", "Actg1", "Mat2a", "Oaz1", "Adam15", "Eef2", "Foxn3", "Pecam1", "Ctsd", "Mmp15", "Cav2", "Rhob", "Igfbp7", "Mylip")
+
+df <- mouse2human(list_to_check)
+new_list <- df$humanGene
+
+DotPlot(human_integrated, features = c(new_list, "FOXN3", "NPTN"), group.by = "newgroup", cols = c("navy", "plum1")) + theme_bw() + theme(axis.text.x = element_text(angle = 90))
+```
+</div>
+
+### Step 21: Change the colour of Dimplot 22072021
+
+<div class = "teal">
+```{r redimplot, message = FALSE, warning = FALSE}
+mouse_integrated@meta.data <- mouse_integrated@meta.data %>% mutate(paperID = case_when(paperID == "uninjured P6" ~ "Uninjured P6", paperID == "uninjured P10" ~ "Uninjured P10", paperID == "uninjured adult" ~ "Uninjured adult", paperID == "P2 MI21D" ~ "P2 21 days post MI", paperID == "Adult MI1D" ~ "Adult 1 day post MI", paperID == "Adult MI3D" ~ "Adult 3 days post MI", paperID == "Adult MI7D" ~ "Adult 7 days post MI", paperID == "Adult MI14D" ~ "Adult 14 days post MI", paperID == "Adult MI28D" ~ "Adult 28 days post MI"))
+saveRDS(mouse_integrated, file = "mouse_integrated.rds")
+Idents(mouse_integrated) <- "paperID"
+
+# It's very important to have an overall view of the dataset and for this purpose, I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(mouse_integrated@reductions$umap@cell.embeddings, mouse_integrated@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Helvetica",
+  size = 16,
+  color = 'black')
+
+# coloured by paperID
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ paperID, colors = colorRampPalette(brewer.pal(9,"Set1"))(9), marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+# pie chart for groups
+df$paperID <- factor(df$paperID, levels = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"))
+
+## pie chart
+dfy <- df %>% group_by(paperID) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+
+dfy$paperID <- factor(dfy$paperID, levels = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"))
+
+figy_pie <- plot_ly(dfy, labels = ~ paperID, values = ~ percentage, type = 'pie', marker = list(colors = colorRampPalette(brewer.pal(9,"Set1"))(9), line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24, family = "Helvetica"), insidetextorientation = "radial")
+
+dfy <- df %>% group_by(seurat_clusters) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+figy_pie <- plot_ly(dfy, labels = ~ seurat_clusters, values = ~ percentage, type = 'pie', marker = list(colors = further.colour, line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24, family = "Helvetica"), insidetextorientation = "radial") %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+######################################
+## redo cluster composition
+# select the feature to analyse
+meta_to_use <- mouse_integrated@meta.data[, c("paperID", "seurat_clusters")]
+
+# summarise the parametres
+summary <- meta_to_use %>% group_by(paperID, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(paperID) %>% tally())
+
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(paperID == "Uninjured P6" ~ n/group_number[1, 2]*100, paperID == "Uninjured P10" ~ n/group_number[2, 2]*100, paperID == "P2 21 days post MI" ~ n/group_number[3, 2]*100, paperID == "Uninjured adult" ~ n/group_number[4, 2]*100, paperID == "Adult 1 day post MI" ~ n/group_number[5, 2]*100, paperID == "Adult 3 days post MI" ~ n/group_number[6, 2]*100, paperID == "Adult 7 days post MI" ~ n/group_number[7, 2]*100, paperID == "Adult 14 days post MI" ~ n/group_number[8, 2]*100, paperID == "Adult 28 days post MI" ~ n/group_number[9, 2]*100))
+
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100, seurat_clusters == "10" ~ percentage/summary1[11, 2]*100, seurat_clusters == "11" ~ percentage/summary1[12, 2]*100, seurat_clusters == "12" ~ percentage/summary1[13, 2]*100, seurat_clusters == "13" ~ percentage/summary1[14, 2]*100, seurat_clusters == "14" ~ percentage/summary1[15, 2]*100))
+
+summary$paperID <- factor(summary$paperID, levels = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"))
+
+write.csv(summary, file = "cluster_composition.csv")
+
+# choose a reference group
+Adult_data <- summary %>% filter (paperID == "Uninjured adult")
+Adult_table <- Adult_data[, c(2, 5)]
+cluster_levels <- Adult_table[order(Adult_table$percentage_norm), ]$seurat_clusters
+summary$seurat_clusters <- factor(summary$seurat_clusters,levels = cluster_levels)
+
+# normalised percentage graph
+#png("cluster_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = paperID)) + scale_fill_manual(values = colorRampPalette(brewer.pal(9,"Set1"))(9)) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(text = element_text(family = "Helvetica"), legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+#dev.off()
 ```
 </div>

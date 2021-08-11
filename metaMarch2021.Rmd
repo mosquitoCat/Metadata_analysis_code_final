@@ -1,0 +1,2639 @@
+---
+title: "Meta_normal_and_HF_human_fetal_and_adult_heart_analysis"
+author: "Cass Li"
+date: "15/09/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style>
+div.teal pre { background-color:#fff44f; }
+div.teal pre.r { background-color:#b2d8d8; }
+</style>
+
+### Step 1: Load the libraries
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# load libraries
+library(Seurat)
+library(ggplot2)
+library(homologene)
+library(clustree)
+library(topGO)
+library(org.Hs.eg.db)
+library(scales)
+library(GSEABase)
+library(AUCell)
+library(dplyr)
+library(plotly)
+library(scran)
+library(scrat)
+library(grid)
+library(gridExtra)
+```
+</div>
+
+### Step 2: Load human EC datasets
+
+<div class = "teal">
+```{r library_loading, message = FALSE, warning = FALSE}
+# GSE106118 
+fetal1 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/GSE106118/fetal_EC.rds")
+# GSE109816 
+adult1 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/GSE109816/adult_EC.rds")
+# GSE134355 - fetal part
+fetal2 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/GSE134355/Fetal_Heart/fetal_EC.rds")
+# GSE134355 - adult part
+adult2 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/GSE134355/Adult_Heart/adult_EC.rds")
+# SRP234812 - fetal
+fetal3 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/SRP234812/fetal_EC.rds")
+# GSE121893 - cHF and dHF
+adult3 <- readRDS("~/Documents/Project_scRNA_seq_meta_analysis/Human_fetal_adult_healthy_heartfailure_meta/GSE121893/adult_EC.rds")
+```
+</div>
+
+### Step 3: Prepare a list of mitochondrial genes to be removed
+
+I remove the mitochondrial genes at the beginning is because remove it later will interfere the normalisation step and downstream analysis.
+
+<div class = "teal">
+```{r remove_mitochondrial_genes}
+# Remove mitochrondrial genes from the dataset using the MT- names and mito carta 2.0 as reference. 
+library(readxl)
+mito.reference <- read_excel("~/Documents/Project_scRNA_seq_meta_analysis/MetaAnalysis/Healthy_mouse_P6_P10_Adult_analysis_run1/mito carta 2.0 reference lists/Human.MitoCarta2.0.xls", sheet = 2) # 1158 genes in total
+# filter the reference gene list based on the subcellular localisation provided by the last column " HPA_PrimarySubcellularLocalization_2015".
+mito.touse1 <- dplyr::filter (mito.reference, grepl("Mitochondria", HPA_PrimarySubcellularLocalization_2015))$Symbol # 361 genes in total
+## mitochondrial genes from each object
+mito.touse2 <- grep(pattern = "^MT-", x = rownames(fetal1@assays$RNA@counts), value = TRUE)
+mito.touse3 <- grep(pattern = "^MT-", x = rownames(fetal2@assays$RNA@counts), value = TRUE)
+mito.touse4 <- grep(pattern = "^MT-", x = rownames(fetal3@assays$RNA@counts), value = TRUE)
+mito.touse5 <- grep(pattern = "^MT-", x = rownames(adult1@assays$RNA@counts), value = TRUE)
+mito.touse6 <- grep(pattern = "^MT-", x = rownames(adult2@assays$RNA@counts), value = TRUE)
+mito.touse7 <- grep(pattern = "^MT-", x = rownames(adult3@assays$RNA@counts), value = TRUE)
+## combine the lists
+mito.touse <- unique(c(mito.touse1, mito.touse2, mito.touse3, mito.touse4, mito.touse5, mito.touse6, mito.touse7))
+# define %!in% function
+`%!in%` = Negate(`%in%`)
+```
+</div>
+
+### Step 4: Extract raw counts from each object to create a new object and add necessary new metadata.
+<div class = "teal">
+
+```{r map create new objects and add metadata}
+# GSE106118
+counts.fetal1 <- fetal1@assays$RNA@counts
+new.counts.fetal1 <- counts.fetal1[rownames(counts.fetal1) %!in% mito.touse, ]
+new.fetal1 <- CreateSeuratObject(counts = new.counts.fetal1)
+new.fetal1@meta.data <- new.fetal1@meta.data %>% mutate (AccessionNo = "GSE106118", species = "Human", age = "Fetal", condition = "Normal") %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.fetal1@meta.data) <- colnames(new.fetal1@assays$RNA@counts)
+saveRDS(new.fetal1, file = "new.fetal1.rds")
+
+# GSE134355 - fetal part
+counts.fetal2 <- fetal2@assays$RNA@counts
+new.counts.fetal2 <- counts.fetal2[rownames(counts.fetal2) %!in% mito.touse, ]
+new.fetal2 <- CreateSeuratObject(counts = new.counts.fetal2)
+new.fetal2@meta.data <- new.fetal2@meta.data %>% mutate (AccessionNo = "GSE134355", species = "Human", age = "Fetal", condition = "Normal") %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.fetal2@meta.data) <- colnames(new.fetal2@assays$RNA@counts)
+saveRDS(new.fetal2, file = "new.fetal2.rds")
+
+# SRP234812 - fetal
+counts.fetal3 <- fetal3@assays$RNA@counts
+new.counts.fetal3 <- counts.fetal3[rownames(counts.fetal3) %!in% mito.touse, ]
+new.fetal3 <- CreateSeuratObject(counts = new.counts.fetal3)
+new.fetal3@meta.data <- new.fetal3@meta.data %>% mutate (AccessionNo = "SRP234812", species = "Human", age = "Fetal", condition = "Normal") %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.fetal3@meta.data) <- colnames(new.fetal3@assays$RNA@counts)
+saveRDS(new.fetal3, file = "new.fetal3.rds")
+
+# GSE109816
+counts.adult1 <- adult1@assays$RNA@counts
+new.counts.adult1 <- counts.adult1[rownames(counts.adult1) %!in% mito.touse, ]
+new.adult1 <- CreateSeuratObject(counts = new.counts.adult1)
+new.adult1@meta.data <- new.adult1@meta.data %>% mutate (AccessionNo = "GSE109816", species = "Human", age = "Adult", condition = "Normal") %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.adult1@meta.data) <- colnames(new.adult1@assays$RNA@counts)
+saveRDS(new.adult1, file = "new.adult1.rds")
+
+# GSE134355 - adult part
+counts.adult2 <- adult2@assays$RNA@counts
+new.counts.adult2 <- counts.adult2[rownames(counts.adult2) %!in% mito.touse, ]
+new.adult2 <- CreateSeuratObject(counts = new.counts.adult2)
+new.adult2@meta.data <- new.adult2@meta.data %>% mutate (AccessionNo = "GSE134355", species = "Human", age = "Adult", condition = "Normal") %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.adult2@meta.data) <- colnames(new.adult2@assays$RNA@counts)
+saveRDS(new.adult2, file = "new.adult2.rds")
+
+# GSE121893
+counts.adult3 <- adult3@assays$RNA@counts
+new.counts.adult3 <- counts.adult3[rownames(counts.adult3) %!in% mito.touse, ]
+new.adult3 <- CreateSeuratObject(counts = new.counts.adult3)
+new.adult3@meta.data <- new.adult3@meta.data %>% mutate (AccessionNo = "GSE121893", species = "Human", age = "Adult", condition = adult3@meta.data$Condition) %>% mutate(group = paste0(AccessionNo, " ", condition, " ", species, " ", age))
+rownames(new.adult3@meta.data) <- colnames(new.adult3@assays$RNA@counts)
+saveRDS(new.adult3, file = "new.adult3.rds")
+
+allgenes4 <- union(rownames(new.fetal1), rownames(new.fetal2))
+allgenes3 <- union(allgenes4, rownames(new.fetal3))
+allgenes2 <- union(allgenes3, rownames(new.adult1))
+allgenes1 <- union(allgenes2, rownames(new.adult2))
+allgenes <- union(allgenes1, rownames(new.adult3))
+length(allgenes) # 53247
+```
+</div>
+
+### Step 5: SCTransform and integrate the data
+
+<div class = "teal">
+```{r integrate objects, warning = FALSE}
+# change accessible memory
+options(future.globals.maxSize = 10000 * 1024^2)
+# create object list
+list <- c(new.fetal1, new.fetal2, new.fetal3, new.adult1, new.adult2, new.adult3)
+# Integration and Label Transfer standard workflow
+for (i in 1:length(list)) {
+    list[[i]] <- SCTransform(list[[i]], verbose = FALSE, return.only.var.genes = FALSE, seed.use = 10241024, variable.features.n = 10000, min_cells = 1) # CHANGE THE MEAN CELLS HERE IS ESSENCIAL
+}
+# Integrate data - it takes awefully long time to finish.
+features <- SelectIntegrationFeatures(object.list = list, nfeatures = 10000)
+save(features, file = "features.RData")
+list <- PrepSCTIntegration(object.list = list, anchor.features = features, 
+    verbose = T)
+anchors <- FindIntegrationAnchors(object.list = list, normalization.method = "SCT", anchor.features = features, verbose = FALSE, k.filter = 100) # if the metadata names is not updated then this line is likely to go wrong. k.filter is reduced from default 200 to 100 as two of the datasets have fewer than 200 cells and also it does perform better if the list starting with a bigger dataset.
+save(anchors, file = "anchors.RData")
+
+integrated <- IntegrateData(anchorset = anchors, normalization.method = "SCT", verbose = FALSE, features.to.integrate = allgenes)
+saveRDS(integrated, file = "integrated.rds")
+# tried with all the genes but run out of memory
+# integrated <- IntegrateData(anchorset = anchors, normalization.method = "SCT", features.to.integrate = allgenes, verbose = FALSE)
+# save(integrated, file = "allgene_integrated.rds")
+```
+</div>
+
+### Step 6: Downstream analysis
+
+<div class = "teal">
+```{r downstream analysis, message = FALSE, warning = FALSE}
+integrated <- RunPCA(integrated, verbose = FALSE)
+set.seed(1024)
+integrated <- RunUMAP(integrated, dims = 1:50)
+saveRDS(integrated, file = "integrated.rds")
+
+# It's very important to have an overall view of the dataset and for this purpose, I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(integrated@reductions$umap@cell.embeddings, integrated@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Open Sans",
+  size = 13,
+  color = 'black')
+
+## nCount_RNA
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ nCount_RNA, marker = list(size = 10, line = list(color = "black", width = 1)), showlegend = FALSE, showscale = FALSE, width = 630, height = 500) %>% layout(title = 'nCount_RNA', yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t)%>% hide_legend() %>% hide_colorbar()
+
+## nFeature_RNA
+# %>% hide_colorbar() will do the trick to remove the color bar
+p2 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ nFeature_RNA, colors = viridisLite::magma(10), marker = list(size = 10, line = list(color = "black", width = 1)), showlegend = FALSE, width = 630, height = 500) %>% layout(title = 'nFeature_RNA', yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+#############################################
+## group
+df$newgroup <- factor(df$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
+colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
+p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ newgroup, colors = colours, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+## cluster 
+## attention: the colour is generated later
+p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = further.colour, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+## pie chart for cluster
+dfy <- df %>% group_by(seurat_clusters) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+
+figy_pie <- plot_ly(dfy, labels = ~ seurat_clusters, values = ~ percentage, type = 'pie', marker = list(colors = further.colour, line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24), insidetextorientation = "radial")
+
+## pie chart for group
+dfy <- df %>% group_by(newgroup) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+
+figy_pie <- plot_ly(dfy, labels = ~ newgroup, values = ~ percentage, type = 'pie', marker = list(colors = colours, line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24), insidetextorientation = "radial")
+########################################################
+
+## Accession number
+p4 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ AccessionNo, colors = viridisLite::inferno(6), marker = list(size = 10, line = list(color = "black", width = 1)), width = 650, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+## Age
+p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ age, colors = viridisLite::cividis(2), marker = list(size = 10, line = list(color = "black", width = 1)), width = 560, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+## Condition
+p6 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ condition, colors = viridisLite::magma(3), marker = list(size = 10, line = list(color = "black", width = 1)), width = 560, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+## Age and condition
+df$newgroup <- paste0(df$condition, " ", df$age)
+integrated@meta.data$newgroup <- paste0(integrated$condition, " ", integrated$age)
+p7 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ newgroup, colors = viridisLite::viridis(4), marker = list(size = 10, line = list(color = "black", width = 1)), width = 560, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+Idents(integrated) <- "seurat_clusters"
+png("integrated_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(integrated, combine = FALSE, pt.size = 1)
+dev.off()
+
+## Look at gene expression values in histogram
+fig <- plot_ly(alpha = 0.6)
+fig <- fig %>% add_histogram(x = ~rnorm(500))
+fig <- fig %>% add_histogram(x = ~rnorm(500) + 1)
+fig <- fig %>% layout(barmode = "overlay")
+
+df_normal_fetal <- df %>% filter(newgroup == "Normal Fetal")
+df_normal_adult <- df %>% filter(newgroup == "Normal Adult")
+df_cHF_adult <- df %>% filter(newgroup == "cHF Adult")
+df_dHF_adult <- df %>% filter(newgroup == "dHF Adult")
+
+# Histogram count
+fig <- plot_ly(alpha = 0.6, nbinsx = 40)
+fig <- fig %>% add_histogram(x = log10(df_normal_fetal$nCount_RNA), name = "Uninjured Fetal", marker = list(color = "#bfbfff"))
+fig <- fig %>% add_histogram(x = log10(df_normal_adult$nCount_RNA), name = "Uninjured Adult", marker = list(color = "blue"))
+fig <- fig %>% add_histogram(x = log10(df_cHF_adult$nCount_RNA), name = "cHF Adult", marker = list(color = "red"))
+fig <- fig %>% add_histogram(x = log10(df_dHF_adult$nCount_RNA), name = "dHF Adult", marker = list(color = "darkred"))
+fig <- fig %>% layout(barmode = "overlay", bargap = 0.1)
+
+# Histogram feature
+fig <- plot_ly(alpha = 0.5, nbinsx = 30)
+fig <- fig %>% add_histogram(x = df_normal_fetal$nFeature_RNA, name = "Uninjured Fetal", marker = list(color = "#bfbfff"))
+fig <- fig %>% add_histogram(x = df_normal_adult$nFeature_RNA, name = "Uninjured Adult", marker = list(color = "blue"))
+fig <- fig %>% add_histogram(x = df_cHF_adult$nFeature_RNA, name = "cHF Adult", marker = list(color = "red"))
+fig <- fig %>% add_histogram(x = df_dHF_adult$nFeature_RNA, name = "dHF Adult", marker = list(color = "darkred"))
+fig <- fig %>% layout(barmode = "overlay", bargap = 0.1)
+
+#########################
+## cluster composition
+#########################
+### select the feature to analyse
+meta_to_use <- integrated@meta.data[, c("newgroup", "seurat_clusters")]
+# summarise the parametres
+summary <- meta_to_use %>% group_by(newgroup, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(newgroup) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(newgroup == "cHF Adult" ~ n/group_number[1, 2]*100, newgroup == "dHF Adult" ~ n/group_number[2, 2]*100, newgroup == "Normal Adult" ~ n/group_number[3, 2]*100, newgroup == "Normal Fetal" ~ n/group_number[4, 2]*100))
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100))
+write.csv(summary, file = "gene_cluster_composition.csv")
+# normalised percentage graph
+colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
+summary$newgroup <- factor(summary$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = newgroup)) + scale_fill_manual(values = colours) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+```
+</div>
+
+### Step 7: FindNeighbours and FindClusters
+
+<div class = "teal">
+    ```{r clustering_and_GO, message = FALSE, warning = FALSE}
+integrated <- FindNeighbors(integrated, dims = 1:50)
+
+for (i in 1:30) {
+    integrated <- FindClusters(integrated, resolution = 0.1*i)
+}
+    
+png("integrated_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(integrated) # cluster tree visualisation
+dev.off()
+
+png("integrated_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off() # I can't find a stable segment in the stability tree so I just chose a stable point with less complicated clustering.
+
+# It seems resolution 0.4 is a good choice and change the clusters to the res 0.4 one
+integrated@meta.data$seurat_clusters <- integrated@meta.data$integrated_snn_res.0.4
+integrated <- FindClusters(integrated, resolution = 0.4)
+saveRDS(integrated, file = "integrated.rds")
+
+png("clustering_integrated.png", res = 300, width = 1800, height = 1800)
+DimPlot(integrated, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(integrated, label = TRUE, label.size = 6, pt.size = 2) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+################
+# COLOUR BUILT #
+################
+
+# isolate colour used in the Seurat package
+colourbuilt <- ggplot_build(p)[[1]][[1]][,  c(1, 5)]
+# reduce to unique colour and cluster information
+further <- distinct(colourbuilt)
+further <- further[order(further$group), ]
+further.colour <- further$colour
+#[1] "#F8766D" "#CD9600" "#7CAE00" "#00BE67" "#00BFC4" "#00A9FF" "#C77CFF"
+#[8] "#FF61CC"
+
+df <- df %>% mutate (cluster = integrated@meta.data$seurat_clusters)
+p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = further.colour, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+###############################################
+## Find conserved markers as the cluster marker
+###############################################
+
+## Find conserved markers
+DefaultAssay(integrated) <- "RNA"
+markers <- FindAllMarkers(integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25) 
+write.csv(markers, file = "markers.csv")
+markers_top20 <- markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC) %>% dplyr::filter (p_val_adj < 0.05)
+write.csv(markers_top20, file = "top20markers.csv")
+# identify conserved cell type markers
+# FindConservedMarkers is like performing FindMarkers for each dataset separately in the integrated analysis and then calculating their combined P-value.
+# condition grouping
+
+integrated@meta.data <- integrated@meta.data %>% mutate(newcondition = case_when(condition == "Normal" ~ "Uninjured", condition == "cHF" ~ "Injured", condition == "dHF" ~ "Injured"))
+saveRDS(integrated, file = "integrated.rds")
+
+# for conserved markers
+for (i in levels(integrated)) {
+  print(i)
+  cons_markers <- FindConservedMarkers(integrated, ident.1 = i, grouping.var = "newcondition", verbose = FALSE)
+  # Select 'avg_log2FC' columns indices
+  avg_log2FC_columns <- grep(pattern = "avg_log2FC", x = colnames(x = cons_markers))
+  # Compute mean 'avg_lo2gFC'
+  cons_markers$mean_avg_log2FC <- rowMeans(x = cons_markers[avg_log2FC_columns])
+  newdf <- cons_markers[, 12:13]
+  ## For upregulated genes
+  # Order by 'mean_avg_log2FC'
+  newdf_up <- newdf[order(newdf$mean_avg_log2FC, decreasing = TRUE), ] %>% top_n(n = 50)
+  write.csv(newdf_up, file = paste0("cluster", i, "top50_upregulated_cons_markers_condition.csv"))
+  ## For downregulated genes
+  newdf_down <- newdf[order(newdf$mean_avg_log2FC, decreasing = FALSE), ] %>% top_n(n = 50)
+  write.csv(newdf_down, file = paste0("cluster", i, "top50_downregulated_cons_markers_condition.csv"))
+}
+
+# plot conserved markers
+cluster0_feature <- c("POSTN", "CLU", "COL3A1", "SAT1", "CCDC80", "ACKR1") # COL3A1
+cluster1_feature <- c("H19", "KDR", "CD36", "COL4A2", "A2M", "CA4") # H19
+cluster2_feature <- c("LGALS1", "TNNT3", "IL32", "COL4A1", "CLDN5", "CA4") # TNNT3
+cluster3_feature <- c("NPPA", "TTN", "MYH6", "ANKRD1", "CKM", "TNNI3", "ACTC1") # ANKRD1
+cluster4_feature <- c("SERPINE2", "PCSK5", "JAG1", "SULF1", "CXCL12", "IGFBP3", "GJA5", "CLDN5") # JAG1
+cluster5_feature <- c("HBB", "HBA2", "HBA1", "S100A9", "CXCL8", "IL1B", "SOD2", "TYROBP", "PLA2G2A") # TYROBP
+# cluster6 uses the cluster marker instead as conserved markers can't be calculated due to low cell number
+cluster6_feature <- c("NDP", "IGFL2", "F5", "KISS1", "NTRK2", "SELL", "TFPI2", "HAPLN1") # "NDP"
+cluster7_feature <- c("RGS5", "STEAP4", "TBX2", "ABCC9", "AGT", "CYGB", "IFIT2", "KLHL23", "NOTCH3") # "TBX2"
+# check and pick the best cluster-specific marker  
+p1 <- VlnPlot(integrated, features = cluster0_feature, pt.size = 0)
+# plot the top markers
+markers.to.plot <- c("COL3A1", "H19", "TNNT3", "ANKRD1", "JAG1", "TYROBP", "NDP", "TBX2")
+p2 <- DotPlot(integrated, features = rev(markers.to.plot), cols = c("blue", "red"), split.by = "newcondition", dot.scale = 5) + RotatedAxis()
+ggplotly(p2, width = 500, height = 600)
+
+# Use topGO to annotate the cluster markers 
+# need to install BiocManager::install("org.Mm.eg.db") if not already
+## remember the test is based on integrated data rather than the raw counts, thus a lot of parameters need to be reset. I first tried to set the threshold to median of expression levels across different cells, it didn't yield any results. Then I tried to set the threshold to lower quantile using type 7 in r and this didn't yield any results either as the threshold is too high. Then I tried to set the threshold to 10%, still doesn't yield any results. I thing uisng the raw counts might be the best way. 
+length <- length(unique(integrated@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(integrated, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > background expression level in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.5)] # ncol(expr) is total cell number
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("integrated_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:10, ] # choose the top 10 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("Cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+}
+
+# Some plots missing the data bars is because the p value is too small and the bar is too big to fit.
+
+# I've checked markers for neutrophils, fibroblasts and lymphocytes and it turns out that the dataset is already rid of them. There are two CD45(Ptprc) positive clusters, cluster 12 and 16 and just need to remove these two. 
+```
+</div>
+
+### Step 8: Analyse the percentage of each cluster in each age group
+
+The further filtering step is not necessary as no contaminated clusters can be recognised.
+
+<div class = "teal">
+```{r cluster_constitution, message = FALSE, warning = FALSE, cache = FALSE}
+# select the feature to analyse
+meta_to_use <- integrated@meta.data[, c("age", "condition", "seurat_clusters")]
+meta_to_use$group <- paste0(meta_to_use$condition, " ", meta_to_use$age)
+# summarise the parameters
+summary <- meta_to_use %>% group_by(group, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(group) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(group == "cHF Adult" ~ n/group_number[1, 2]*100, group == "dHF Adult" ~ n/group_number[2, 2]*100, group == "Normal Adult" ~ n/group_number[3, 2]*100, group == "Normal Fetal" ~ n/group_number[4, 2]*100))
+
+# actual population graph
+col.touse <- viridisLite::viridis(4)
+png("integrated_cluster_population_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+####################################################################
+### useful piece of code for filling up the missing data with 0s ###
+####################################################################
+# build the first column with the right number of rows
+group <- c(rep("cHF Adult", 5), rep("dHF Adult", 5), rep("Normal Adult", 5), rep("Normal Fetal", 5))
+# build into a data frame
+new.df <- as.data.frame(group)
+# populate the cluster column
+new.df$seurat_clusters <- c(0:4)
+# populate the cell number column 0
+new.df$n <- 0
+# populate the percentage column 0
+new.df$percentage <- 0
+# merge the new data frame with the summary data frame with missing rows based on the group and seurat_cluster columns
+agg.df <- merge(new.df, summary, c("group", "seurat_clusters"),all.x = TRUE)
+# populate the cell number and percentage columns with numbers from the summary data frame if available, otherwise remains 0
+agg.df$n <- ifelse(is.na(agg.df$n.y), 0, agg.df$n.y)
+agg.df$percentage <- ifelse(is.na(agg.df$percentage.y), 0, agg.df$percentage.y)
+# only choose the useful columns from the merged data frame
+final <- agg.df[, names(new.df)]
+head(final)
+
+group_levels <- c("cHF Adult", "dHF Adult", "Normal Adult", "Normal Fetal")
+final$group <- factor(final$group,levels = group_levels)
+final$seurat_clusters <- factor(final$seurat_clusters)
+####################################################################
+
+png("integrated_cluster_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = final, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = group), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# normalise percentage data
+summary1 <- as.data.frame(final %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+
+final <- final %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100))
+
+# order the data using Healthy data
+fetal_data <- final %>% filter (group == "Normal Fetal")
+fetal_table <- fetal_data[, c(2, 5)]
+cluster_levels <- fetal_table[order(fetal_table$percentage_norm), ]$seurat_clusters
+final$seurat_clusters <- factor(final$seurat_clusters,levels = cluster_levels)
+
+# normalised percentage graph
+png("clean_MI_integrated_cluster_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = final, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = group)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# Calculate the dominant group
+final <- final %>% mutate (dominant = case_when(percentage_norm >= 30 ~ "Y", percentage_norm < 30 ~ "N"))
+write.csv(final, file = "summary_percentage_dominant.csv")
+
+# useful tibble code
+integrated@meta.data %>% group_by(group) %>% summarise(n())
+integrated@meta.data %>% group_by(group) %>% summarise(mean(nCount_RNA))
+integrated@meta.data %>% group_by(group) %>% summarise(mean(nFeature_RNA))
+
+# get the colour information
+p <- DimPlot(integrated)
+q <- ggplot_build(p)
+r <- q$data[[1]]
+s <- r %>% group_by(group) %>% summarise(colour)
+unique(s$colour)
+# [1] "#F8766D" "#A3A500" "#00BF7D" "#00B0F6" "#E76BF3"
+
+# add colour information to meta.data
+integrated@meta.data <- integrated@meta.data %>% mutate(colour = case_when(seurat_clusters == "0" ~ "#F8766D", seurat_clusters == "1" ~ "#A3A500", seurat_clusters == "2" ~ "#00BF7D", seurat_clusters == "3" ~ "#00B0F6", seurat_clusters == "4" ~ "#E76BF3"))
+saveRDS(integrated, "integrated.rds")
+
+# USE reticulate to change Seurat to h5ad instead.
+# reticulate worked the best to port over the data I needed
+steal <- as.data.frame(rownames(integrated))
+rownames(steal) <- steal[, 1]
+# get the raw data
+x <- as.matrix(integrated@assays$RNA@counts)
+z <- integrated@assays$integrated@var.features # need to filter the counts data to only include the genes in the features
+y <- x[which(rownames(x) %in% z), ]
+
+library(reticulate)
+anndata <- import("anndata", convert = FALSE)
+adata <- anndata$AnnData(
+    X = t(as.matrix(GetAssayData(object = integrated, slot = "data"))),
+    obs = integrated[[]],
+    var = steal,
+    layers = list("raw" = t(y)),
+    obsm  = list(
+        "X_pca" = Embeddings(integrated[["pca"]]),
+        "X_umap" = Embeddings(integrated[["umap"]])
+    )
+)
+anndata$AnnData$write(adata, 'reticulate_integrated.h5ad')
+
+####################
+####################
+## This part aims to find the differentially expressed markers between the new groups in each cluster
+####################
+####################
+
+DefaultAssay(integrated) <- "RNA"
+# overall DEG
+Idents(integrated) <- "newcondition"
+AllDEG <- FindMarkers(integrated, ident.1 = "Uninjured", ident.2 = "Injured", min.pct = 0.25, verbose = FALSE)
+write.csv(AllDEG, file = "DEG_condition.csv")
+
+# top 50
+## downregulated in injured
+AllDEG_down <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(AllDEG_down, file = "DEG_downINinjured.csv")
+AllDEG_top50_down <- AllDEG_top50_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_down, file = "top50_downregulated_DEG_condition.csv")
+## upregulated in injured
+AllDEG_up <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(AllDEG_up, file = "DEG_upINinjured.csv")
+AllDEG_top50_up <- AllDEG_top50_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_up, file = "top50_upregulated_DEG_condition.csv")
+# plot up and down regulated genes
+Idents(integrated) <- "seurat_clusters"
+feature_up <- rownames(AllDEG_top50_up)[1:10]
+feature_down <- rownames(AllDEG_top50_down) [1:10]
+p1 <- VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+p2 <- VlnPlot(integrated, features = feature_down, pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)+ theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+p3 <- VlnPlot(integrated, features = c(feature_up, feature_down), pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+
+#### the following is for the python plotting
+library(reticulate)
+integrated$newgroup <- paste0(integrated$condition, " ", integrated$age)
+for (i in Idents(integrated)) {
+  cluster <- subset(integrated, idents = i) # subset will change a lot of metadata into NAs
+  steal <- as.data.frame(rownames(cluster))
+  rownames(steal) <- steal[, 1]
+  # get the raw data
+  x <- as.matrix(cluster@assays$RNA@counts)
+  z <- cluster@assays$integrated@var.features # need to filter the counts data to only include the genes in the features
+  y <- x[which(rownames(x) %in% z), ]
+
+  anndata <- import("anndata", convert = FALSE)
+  adata <- anndata$AnnData(
+      X = t(as.matrix(GetAssayData(object = cluster, slot = "data"))),
+      obs = cluster[[]],
+      var = steal,
+      layers = list("raw" = t(y)),
+      obsm  = list(
+          "X_pca" = Embeddings(cluster[["pca"]]),
+          "X_umap" = Embeddings(cluster[["umap"]])
+      )
+  )
+  anndata$AnnData$write(adata, paste0("cluster", i, "reticulate.h5ad"))
+}
+```
+</div>
+
+### Step 9: DE analysis for whole dataset
+method 1: Seurat DE plus scanpy
+method 2: scDD (pending)
+method 3: scrat (only for proliferative cells)
+
+<div class = "teal">
+```{r}
+## method 1: Seurat DE
+# change the Idents to group so I can look at P6 Healthy, P10 Healthy and Adult Healthy
+Idents(integrated) <- "newgroup"
+# step1 : pseudo-bulk DEG for all cells between P6 and P10, P6 and healthy, P10 and healthy
+##############################
+# Normal Fetal vs Normal Adult
+##############################
+FetalAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Fetal", ident.2 = "Normal Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(FetalAdultAllDEG, file = "FetalAdultAllDEG.csv")
+# top 50
+## downregulated in Adult
+FetalAdultAllDEG_down <- FetalAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+FetalAdultAllDEG_top50_down <- FetalAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(FetalAdultAllDEG_top50_down, file = "top50_downregulated_FetalAdultAllDEG.csv")
+View(FetalAdultAllDEG_top50_down)
+## upregulated in Adult
+FetalAdultAllDEG_up <- FetalAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+FetalAdultAllDEG_top50_up <- FetalAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(FetalAdultAllDEG_top50_up, file = "top50_upregulated_FetalAdultAllDEG.csv")
+View(FetalAdultAllDEG_top50_up)
+# plot up and down regulated genes
+feature_up <- rownames(FetalAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(FetalAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("blue", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("blue", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#############################################
+#############################################
+# GO analysis for FetalAdultAllDEG_top50_down
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(FetalAdultAllDEG_top50_down)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("FetalAdultAllDEG_top50_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("FetalAdultAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("FetalAdultAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+#############################################
+#############################################
+# GO analysis for FetalAdultAllDEG_top50_up
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(FetalAdultAllDEG_top50_up)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("FetalAdultAllDEG_top50_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("FetalAdultAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("FetalAdultAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+##############################
+# cHF Adult vs Normal Adult
+##############################
+cHFAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "cHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(cHFAdultAllDEG, file = "cHFAdultAllDEG.csv")
+# top 50
+## downregulated in Adult
+cHFAdultAllDEG_down <- cHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+cHFAdultAllDEG_top50_down <- cHFAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(cHFAdultAllDEG_top50_down, file = "top50_downregulated_cHFAdultAllDEG.csv")
+View(cHFAdultAllDEG_top50_down)
+## upregulated in Adult
+cHFAdultAllDEG_up <- cHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+cHFAdultAllDEG_top50_up <- cHFAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(cHFAdultAllDEG_top50_up, file = "top50_upregulated_cHFAdultAllDEG.csv")
+View(cHFAdultAllDEG_top50_up)
+# plot up and down regulated genes
+feature_up <- rownames(cHFAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(cHFAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("cHF Adult", "Normal Adult"), cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("cHF Adult", "Normal Adult"), cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#############################################
+#############################################
+# GO analysis for cHFAdultAllDEG_top50_down
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(cHFAdultAllDEG_top50_down)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("cHFAdultAllDEG_top50_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("cHFAdultAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("cHFAdultAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+#############################################
+#############################################
+# GO analysis for cHFAdultAllDEG_top50_up
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(cHFAdultAllDEG_top50_up)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("cHFAdultAllDEG_top50_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("cHFAdultAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("cHFAdultAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+##############################
+# dHF Adult vs Normal Adult
+##############################
+dHFAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "dHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(dHFAdultAllDEG, file = "dHFAdultAllDEG.csv")
+# top 50
+## downregulated in Adult
+dHFAdultAllDEG_down <- dHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+dHFAdultAllDEG_top50_down <- dHFAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(dHFAdultAllDEG_top50_down, file = "top50_downregulated_dHFAdultAllDEG.csv")
+View(dHFAdultAllDEG_top50_down)
+## upregulated in Adult
+dHFAdultAllDEG_up <- dHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+dHFAdultAllDEG_top50_up <- dHFAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(dHFAdultAllDEG_top50_up, file = "top50_upregulated_dHFAdultAllDEG.csv")
+View(dHFAdultAllDEG_top50_up)
+# plot up and down regulated genes
+feature_up <- rownames(dHFAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(dHFAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("dHF Adult", "Normal Adult"), cols = c("darkred", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("dHF Adult", "Normal Adult"), cols = c("darkred", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#############################################
+#############################################
+# GO analysis for dHFAdultAllDEG_top50_down
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(dHFAdultAllDEG_top50_down)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("dHFAdultAllDEG_top50_down_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("dHFAdultAllDEG_top50_down_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("dHFAdultAllDEG_top50_down_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+#############################################
+#############################################
+# GO analysis for dHFAdultAllDEG_top50_up
+#############################################
+#############################################
+expr <- integrated@assays$RNA@data
+# Select genes that are expressed > 0 in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+de.genes <- rownames(dHFAdultAllDEG_top50_up)
+all.genes <- rownames(expr)
+# define geneList as 1 if gene is in expressed.genes, 0 otherwise
+geneList <- ifelse(all.genes %in% de.genes, 1, 0)
+names(geneList) <- all.genes
+# Create topGOdata object
+GOdata <- new("topGOdata",
+              ontology = "BP", # use biological process ontology
+              allGenes = geneList,
+              geneSelectionFun = function(x)(x == 1),
+              annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+# Test for enrichment using Fisher's Exact Test
+resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+# Save GO table
+write.csv(GO_table, file = paste0("dHFAdultAllDEG_top50_up_","GO_term_table", ".csv"))
+# Generate GO term bar graph
+Go_table_touse <- GO_table[1:15, ] # choose the top 5 GO terms
+Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+
+Go_table_touse$Term <- factor(Go_table_touse$Term, levels = Go_table_touse$Term[order(Go_table_touse$P_value)])
+png(paste0("dHFAdultAllDEG_top50_up_", "GO_term_table", ".png"), res = 300, width = 2000, height = 1000)
+ggplot(Go_table_touse, aes(x = Term, y = P_value)) +
+    geom_bar(stat = "identity", fill = "gray", width = 0.6) + 
+    coord_flip() +
+    ggtitle(paste0("dHFAdultAllDEG_top50_up_GO")) +
+    ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+    theme_classic() + 
+    theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(color = "black", size = 12), axis.text.y = element_text(color = "black", size = 12), axis.title.y = element_blank(), plot.title = element_text(size = 18), axis.title.x = element_text(color = "black", size = 12)) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+dev.off()
+
+```
+</div>
+
+### Step 10: pairwise DE analysis
+<div class = "teal">
+```{r}
+# section 1: Normal fetal vs normal adult
+# exclude cells from GSE121893
+# create object list
+list <- c(new.fetal1, new.fetal2, new.fetal3, new.adult1, new.adult2)
+# Integration and Label Transfer standard workflow
+for (i in 1:length(list)) {
+    list[[i]] <- SCTransform(list[[i]], verbose = FALSE, return.only.var.genes = FALSE, seed.use = 10241024, variable.features.n = 10000, min_cells = 1)
+}
+# Integrate data - it takes awefully long time to finish.
+features <- SelectIntegrationFeatures(object.list = list, nfeatures = 6000)
+save(features, file = "features.RData")
+list <- PrepSCTIntegration(object.list = list, anchor.features = features, 
+    verbose = T)
+anchors1 <- FindIntegrationAnchors(object.list = list, normalization.method = "SCT", anchor.features = features, verbose = FALSE, k.filter = 100) # if the metadata names is not updated then this line is likely to go wrong. k.filter is reduced from default 200 to 100 as two of the datasets have fewer than 200 cells and also it does perform better if the list starting with a bigger dataset.
+save(anchors1, file = "anchors1.RData")
+
+allgenes3 <- union(rownames(new.fetal1), rownames(new.fetal2))
+allgenes2 <- union(allgenes3, rownames(new.fetal3))
+allgenes1 <- union(allgenes2, rownames(new.adult1))
+allgenes <- union(allgenes1, rownames(new.adult2))
+length(allgenes) # 53246
+
+integrated1 <- IntegrateData(anchorset = anchors1, normalization.method = "SCT", verbose = FALSE, features.to.integrate = allgenes)
+saveRDS(integrated1, file = "integrated1.rds") # allgene worked for this one, yayayayayay!
+# tried with all the genes but run out of memory
+# integrated <- IntegrateData(anchorset = anchors, normalization.method = "SCT", features.to.integrate = allgenes, verbose = FALSE)
+# save(integrated, file = "allgene_integrated.rds")
+integrated1 <- RunPCA(integrated1, verbose = FALSE)
+set.seed(1024)
+integrated1 <- RunUMAP(integrated1, dims = 1:50)
+saveRDS(integrated1, file = "integrated1.rds")
+
+# It's very important to have an overall view of the dataset and for this purpose, I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(integrated1@reductions$umap@cell.embeddings, integrated1@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Open Sans",
+  size = 13,
+  color = 'black')
+
+## group
+# col.touse <- c('#0B1354', '#165BAA', '#A155B9', '#F765A3', '#FFA4B6', '#F9D1D1','#FFE169')
+p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ group, colors = viridisLite::plasma(7), marker = list(size = 10, line = list(color = "black", width = 1)), width = 750, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t)
+## Accession number
+p4 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ AccessionNo, colors = viridisLite::inferno(6), marker = list(size = 10, line = list(color = "black", width = 1)), width = 650, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t)
+## Age
+p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ age, colors = viridisLite::cividis(2), marker = list(size = 10, line = list(color = "black", width = 1)), width = 560, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_colorbar() %>% hide_legend()
+
+png("integrated1_UMAP.png", res = 300, width = 2500, height = 2500)
+DimPlot(integrated1, combine = FALSE, pt.size = 1)
+dev.off()
+
+# find neighbours
+integrated1 <- FindNeighbors(integrated1, dims = 1:50)
+
+for (i in 1:30) {
+    integrated1 <- FindClusters(integrated1, resolution = 0.1*i)
+}
+    
+png("integrated1_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(integrated1) # cluster tree visualisation
+dev.off()
+
+png("integrated1_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(integrated1, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# 1.4 seems a good choice
+integrated1@meta.data$seurat_clusters <- integrated1@meta.data$integrated_snn_res.1.1
+integrated1 <- FindClusters(integrated1, resolution = 1.1)
+saveRDS(integrated1, file = "integrated1.rds")
+
+png("clustering_integrated1.png", res = 300, width = 1800, height = 1800)
+DimPlot(integrated1, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(integrated1, label = TRUE, label.size = 6, pt.size = 2) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+################
+# COLOUR BUILT #
+################
+
+# isolate colour used in the Seurat package
+colourbuilt <- ggplot_build(p)[[1]][[1]][,  c(1, 5)]
+# reduce to unique colour and cluster information
+further <- distinct(colourbuilt)
+further <- further[order(further$group), ]
+further.colour <- further$colour
+# [1] "#F8766D" "#E38900" "#C49A00" "#99A800" "#53B400" "#00BC56" "#00C094"
+# [8] "#00BFC4" "#00B6EB" "#06A4FF" "#A58AFF" "#DF70F8" "#FB61D7" "#FF66A8"
+df <- df %>% mutate (cluster = integrated1@meta.data$seurat_clusters)
+plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ cluster, colors = further.colour, marker = list(size = 10, line = list(color = "black", width = 1)), width = 600, height = 600) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+# Find cluster markers using the clustering information in this assay using roc method
+integrated1_markers <- FindAllMarkers(integrated1, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2) # had to lower the threshod of logfc as some clusters jsut don't have the markers that can pass the bar
+integrated1_markers_top10 <- integrated1_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC) # I like the AUC method better
+# ATTENTION: not all markers have a P < 0.05. Choose carefully.
+write.csv(integrated1_markers, file = "integrated1_cluster_markers.csv")
+write.csv(integrated1_markers_top10, file = "integrated1_cluster_marker_top10.csv")
+
+# GO analysis
+length <- length(unique(integrated1@meta.data$seurat_clusters)) # number of loops
+for (i in 0:(length - 1)) { # starting from 0
+    cluster <- subset(integrated1, idents = as.character(i))
+    expr <- cluster@assays$integrated@data
+    # Select genes that are expressed > background expression level in at least 75% of cells (somewhat arbitrary definition and too high in my case)
+    n.gt.0 <- apply(expr, 1, function(x)length(which(x > 0)))
+    expressed.genes <- rownames(expr)[which(n.gt.0/ncol(expr) >= 0.6)] # ncol(expr) is total cell number
+    all.genes <- rownames(expr)
+    # define geneList as 1 if gene is in expressed.genes, 0 otherwise
+    geneList <- ifelse(all.genes %in% expressed.genes, 1, 0)
+    names(geneList) <- all.genes
+    # Create topGOdata object
+    GOdata <- new("topGOdata",
+                  ontology = "BP", # use biological process ontology
+                  allGenes = geneList,
+                  geneSelectionFun = function(x)(x == 1),
+                  annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+    # Test for enrichment using Fisher's Exact Test
+    resultFisher <- runTest(GOdata, algorithm = "elim", statistic = "fisher")
+    GO_table <- GenTable(GOdata, Fisher = resultFisher, topNodes = 20, numChar = 60)
+    # Save GO table
+    write.csv(GO_table, file = paste0("integrated1_cluster_", i,"GO_term_table", ".csv"))
+    # Generate GO term bar graph
+    Go_table_touse <- GO_table[1:10, ] # choose the top 10 GO terms
+    Go_table_touse$NewTerm <- paste0(Go_table_touse$GO.ID, "_", Go_table_touse$Term)
+    Go_table_touse$P_value <- -log10(as.numeric(Go_table_touse$Fisher))
+    Go_table_touse$NewTerm <- factor(Go_table_touse$NewTerm, levels = Go_table_touse$NewTerm[order(Go_table_touse$P_value)])
+    colour_touse <- hue_pal()(length)[i+1]
+    png(paste0("integrated1_cluster_", i,"GO_term_table", ".png"), res = 300, width = 4000, height = 1000)
+    print(ggplot(Go_table_touse, aes(x = NewTerm, y = P_value)) +
+              geom_bar(stat="identity", fill = colour_touse, width = 0.6) + 
+              coord_flip() +
+              ggtitle(paste0("Integrated1 Cluster ", i)) +
+              ylab(expression("-log"[10]~ paste("(", italic(P), " value)"))) +
+              theme_classic() + 
+              theme(axis.line = element_line(colour = "black", size = 1, linetype = "solid"), axis.text.x = element_text(face = "bold", color = "black", size = 14), axis.text.y = element_text(face="bold", color = "black", size = 14), axis.title.y = element_blank(), plot.title = element_text(size = 14, face = "bold"), axis.title.x = element_text(color = "black", size = 14, face = "bold"))) # Remember to wrap the png call using print to get it plotted and saved!!!!!!!!
+    dev.off()
+}
+
+# select the feature to analyse
+meta_to_use <- integrated1@meta.data[, c("age", "seurat_clusters")]
+# summarise the parameters
+summary <- meta_to_use %>% group_by(age, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each age
+age_number <- as.data.frame(meta_to_use %>% group_by(age) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(age == "Adult" ~ n/age_number[1, 2]*100, age == "Fetal" ~ n/age_number[2, 2]*100))
+
+# actual population graph
+col.touse <- viridisLite::cividis(2)
+png("integrated1_cluster_population_age_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = age)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = n)) + geom_bar(stat = "identity", aes(fill = age)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Number of Cells") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+####################################################################
+### useful piece of code for filling up the missing data with 0s ###
+####################################################################
+# build the first column with the right number of rows
+age <- c(rep("Adult", 14), rep("Fetal", 14))
+# build into a data frame
+new.df <- as.data.frame(age)
+# populate the cluster column
+new.df$seurat_clusters <- c(0:13)
+# populate the cell number column 0
+new.df$n <- 0
+# populate the percentage column 0
+new.df$percentage <- 0
+# merge the new data frame with the summary data frame with missing rows based on the group and seurat_cluster columns
+agg.df <- merge(new.df, summary, c("age", "seurat_clusters"),all.x = TRUE)
+# populate the cell number and percentage columns with numbers from the summary data frame if available, otherwise remains 0
+agg.df$n <- ifelse(is.na(agg.df$n.y), 0, agg.df$n.y)
+agg.df$percentage <- ifelse(is.na(agg.df$percentage.y), 0, agg.df$percentage.y)
+# only choose the useful columns from the merged data frame
+final <- agg.df[, names(new.df)]
+head(final)
+
+age_levels <- c("Adult", "Fetal")
+final$age <- factor(final$age, levels = age_levels)
+final$seurat_clusters <- factor(final$seurat_clusters)
+####################################################################
+
+png("integrated_cluster_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = age), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm"))
+p <- ggplot(data = final, aes(x = seurat_clusters, y = percentage)) + geom_bar(stat = "identity", aes(fill = age), position = position_dodge()) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Percentage (%)") + theme(legend.position = c(0.85, 0.85), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# normalise percentage data
+summary1 <- as.data.frame(final %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+
+final <- final %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100, seurat_clusters == "9" ~ percentage/summary1[10, 2]*100, seurat_clusters == "10" ~ percentage/summary1[11, 2]*100, seurat_clusters == "11" ~ percentage/summary1[12, 2]*100, seurat_clusters == "12" ~ percentage/summary1[13, 2]*100, seurat_clusters == "13" ~ percentage/summary1[14, 2]*100))
+
+# order the data using Healthy data
+fetal_data <- final %>% filter (age == "Fetal")
+fetal_table <- fetal_data[, c(2, 5)]
+cluster_levels <- fetal_table[order(fetal_table$percentage_norm), ]$seurat_clusters
+final$seurat_clusters <- factor(final$seurat_clusters, levels = cluster_levels)
+
+# normalised percentage graph
+png("integrated1_cluster_normalised_percentage_group_split.png", res = 300, width = 2000, height = 2000)
+ggplot(data = final, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = age)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) 
+p <- ggplot(data = final, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = age)) + scale_fill_manual(values = col.touse) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+dev.off()
+
+# Calculate the dominant group
+final <- final %>% mutate (dominant = case_when(percentage_norm >= 60 ~ "Y", percentage_norm < 60 ~ "N"))
+write.csv(final, file = "integrated1_summary_percentage_dominant.csv")
+
+# Conserved markers
+
+# DEGs
+
+# Port over to scanpy
+# USE reticulate to change Seurat to h5ad instead.
+# reticulate worked the best to port over the data I needed
+# steal <- as.data.frame(integrated1@assays$integrated@var.features)
+steal <- as.data.frame(rownames(integrated1))
+rownames(steal) <- steal[, 1]
+# get the raw data
+x <- as.matrix(integrated1@assays$RNA@counts)
+z <- integrated1@assays$integrated@var.features # need to filter the counts data to only include the genes in the features
+y <- x[which(rownames(x) %in% z), ]
+
+library(reticulate)
+anndata <- import("anndata", convert = FALSE)
+adata <- anndata$AnnData(
+    X = t(as.matrix(GetAssayData(object = integrated1, slot = "data"))),
+    obs = integrated1[[]],
+    var = steal,
+    #var = as.data.frame(rownames(integrated1)),
+    #layers = list("raw" = t(y)),
+    obsm  = list(
+        "X_pca" = Embeddings(integrated1[["pca"]]),
+        "X_umap" = Embeddings(integrated1[["umap"]])
+    )
+)
+anndata$AnnData$write(adata, 'reticulate_integrated1.h5ad')
+anndata$AnnData$write(adata, 'reticulate_integrated_bug.h5ad')
+
+# regulon analysis (Done in 4.0)
+# load data
+plf <- readRDS("integrated1.rds")
+# load library
+library(dorothea)
+library(viper)
+## read Dorothea Regulons for mouse:
+dorothea_regulon_human <- get(data("dorothea_hs", package = "dorothea"))
+
+## obtain the regulons based on interactions with confidence level A, B and C
+regulon <- dorothea_regulon_human %>% dplyr::filter(confidence %in% c("A","B","C"))
+
+## We compute Viper Scores 
+plf <- run_viper(plf, regulon, options = list(method = "scale", minsize = 4, eset.filter = FALSE, cores = 2, verbose = FALSE))
+
+## We compute the Nearest Neighbours to perform cluster
+DefaultAssay(object = plf) <- "dorothea"
+plf <- ScaleData(plf)
+plf <- RunPCA(plf, features = rownames(plf), verbose = FALSE)
+plf <- FindNeighbors(plf, dims = 1:30, verbose = FALSE)
+
+#########################
+#########################
+# find neighbours
+for (i in 1:20) {
+        plf <- FindClusters(plf, resolution = 0.1*i)
+}
+
+library(clustree)
+png("dorothea_integrated1_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(plf) # cluster tree visualisation
+dev.off()
+
+png("dorothea_integrated1_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(plf, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+# resolution 0.4 is a good choice
+plf@meta.data$seurat_clusters <- plf@meta.data$dorothea_snn_res.0.4
+plf <- FindClusters(plf, resolution = 0.4) # run it again
+saveRDS(plf, file = "plf.rds")
+#########################
+#########################
+set.seed(1024)
+plf <- RunUMAP(plf, dims = 1:30, umap.method = "uwot", metric = "cosine")
+
+plf.markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, verbose = FALSE)
+write.csv(plf.markers, file = "dorothea_tf_cluster_markers.csv")
+
+## plot the new cluster based on TF activities
+# plot clustering
+## colour
+# col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+## Dimplot
+## the png function seems having problems with the helvatica font
+library(plotly)
+png("dorothea_integrated1_cluster.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+p <- DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+## Dimplot by group
+col.touse <- viridisLite::cividis(2)
+png("dorothea_integrated1_cluster_age.png", res = 300, width = 2500, height = 2500)
+DimPlot(plf, label = FALSE, group.by = "age", cols = col.touse)
+p <- DimPlot(plf, label = FALSE, group.by = "age", cols = col.touse) + NoLegend()
+ggplotly(p, width = 500, height = 500)
+dev.off()
+
+## replot
+
+df <- cbind(plf@reductions$umap@cell.embeddings, plf@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+t <- list(
+  family = "Open Sans",
+  size = 13,
+  color = 'black')
+
+## group
+# col.touse <- c('#0B1354', '#165BAA', '#A155B9', '#F765A3', '#FFA4B6', '#F9D1D1','#FFE169')
+p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ age, colors = col.touse, marker = list(size = 10, line = list(color = "black", width = 1)), width = 600, height = 600) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_colorbar() %>% hide_legend()
+
+################
+# COLOUR BUILT #
+################
+p <- DimPlot(plf, label = TRUE, label.size = 6) + NoLegend()
+# isolate colour used in the Seurat package
+colourbuilt <- ggplot_build(p)[[1]][[1]][,  c(1, 5)]
+# reduce to unique colour and cluster information
+further <- distinct(colourbuilt)
+further <- further[order(further$group), ]
+further.colour <- further$colour
+
+df <- df %>% mutate (cluster = plf@meta.data$seurat_clusters)
+plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ cluster, colors = further.colour, marker = list(size = 10, line = list(color = "black", width = 1)), width = 600, height = 600) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t) %>% hide_legend() %>% hide_colorbar()
+
+## TF activity per group
+## We transform Viper scores, scaled by seurat, into a data frame to better 
+## handling the results
+viper_scores_df <- GetAssayData(plf, slot = "scale.data", assay = "dorothea") 
+namestochange <- colnames(viper_scores_df)
+
+viper_scores_df %>% data.frame() 
+t_viper_scores_df <- viper_scores_df %>% t()
+
+## We create a data frame containing the cells and their clusters
+# change idents from seurat clusters to group
+library(tidyr)
+Idents(plf) <- "age"
+CellsClusters <- data.frame(cell = names(Idents(plf)), 
+                            cell_type = as.character(Idents(plf)),
+                            stringsAsFactors = FALSE)
+
+## We create a data frame with the Viper score per cell and its clusters
+library(dplyr)
+library(tibble)
+viper_scores_clusters <- t_viper_scores_df %>%
+  data.frame() %>% 
+  rownames_to_column("cell") %>%
+  gather(tf, activity, -cell) %>%
+  inner_join(CellsClusters)
+
+## We summarize the Viper scores by cellpopulation
+summarized_viper_scores <- viper_scores_clusters %>% 
+  group_by(tf, cell_type) %>%
+  summarise(avg = mean(activity),
+            std = sd(activity))
+
+## We select the 20 most variable TFs. (20*2 populations = 40)
+highly_variable_tfs <- summarized_viper_scores %>%
+  group_by(tf) %>%
+  mutate(var = var(avg))  %>%
+  ungroup() %>%
+  top_n(40, var) %>%
+  distinct(tf)
+
+## We prepare the data for the plot
+summarized_viper_scores_df <- summarized_viper_scores %>%
+  semi_join(highly_variable_tfs, by = "tf") %>%
+  dplyr::select(-std) %>%   
+  spread(tf, avg) %>%
+  data.frame(row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+
+## It's easier to look at after changing the order of the data
+x <- c("Fetal", "Adult")
+s <- t(summarized_viper_scores_df)
+t <- s
+
+palette_length = 100
+my_color = colorRampPalette(c("Darkblue", "white","red"))(palette_length)
+my_color = colorRampPalette(c("Darkblue", "white","orange"))(palette_length)
+
+my_breaks <- c(seq(min(summarized_viper_scores_df), 0, 
+                   length.out=ceiling(palette_length/2) + 1),
+               seq(max(summarized_viper_scores_df)/palette_length, 
+                   max(summarized_viper_scores_df), 
+                   length.out=floor(palette_length/2)))
+
+cluster_markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2)
+cluster_markers_top10 <- cluster_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(cluster_markers, file = "Dorothea_cluster_markers_byage.csv")
+write.csv(cluster_markers_top10, file = "Dorothea_cluster_markers_byage_top10.csv")
+
+Idents(plf) <- "seurat_clusters"
+cluster_markers <- FindAllMarkers(plf, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.2)
+cluster_markers_top10 <- cluster_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(cluster_markers, file = "Dorothea_cluster_markers_bycluster.csv")
+write.csv(cluster_markers_top10, file = "Dorothea_cluster_markers_bycluster_top10.csv")
+
+# main = "TF activity inference" can be added using inkscape
+library(pheatmap)
+viper_hmap <- pheatmap(summarized_viper_scores_df, fontsize = 12, 
+                       color= my_color, breaks = my_breaks, 
+                       angle_col = 90,
+                       treeheight_col = 10,  border_color = "black", height = 600, width = 900, cellwidth = 20, cellheight = 25)
+viper_hmap
+
+# port over to scanpy
+steal <- as.data.frame(rownames(plf@assays$dorothea@data))
+rownames(steal) <- steal[, 1]
+
+library(reticulate)
+anndata <- import("anndata", convert = FALSE)
+adata <- anndata$AnnData(
+    X = t(as.matrix(GetAssayData(object = plf, slot = "data", assay = "dorothea"))),
+    obs = plf[[]],
+    var = steal,
+    layers = list("raw" = t(as.matrix(GetAssayData(object = plf, slot = "scale.data")))),
+    obsm  = list(
+        "X_pca" = Embeddings(plf[["pca"]]),
+        "X_umap" = Embeddings(plf[["umap"]])
+    )
+)
+anndata$AnnData$write(adata, 'reticulate_plf.h5ad')
+```
+</div>
+
+### Step 11: functional studies of arterial/venous responses
+
+<div class = "teal">
+```{r}
+### Top-50 marker genes of pooled traditional EC subtypes heart from Peter Carmeliet's Cell paper "Single-Cell Transcriptome Atlas of Murine Endothelial cells"
+marker.file <- read.csv("PC_Cell_Paper_markers.csv", header = TRUE)
+# since these are murine markers, I pulled out the corresponding human genes
+artery.marker <- mouse2human(marker.file$artery)[, 2]
+capillary.marker <- mouse2human(marker.file$capillary)[, 2]
+vein.marker <- mouse2human(marker.file$vein)[, 2]
+
+tip.marker <- c("Adm", "Ankrd37", "C1qtnf6", "Cldn5", "Col4a1", "Cotl1", "Dll4", "Ednrb", "Fscn1", "Gpihbp1", "Hspg2", "Igfbp3", "Inhbb", "Jup", "Kcne3", "Kcnj8", "Lama4", "Lamb1", "Lxn", "Marcksl1", "Mcam", "Mest", "N4bp3", "Nid2", "Notch4", "Plod1", "Plxnd1", "Pmepa1", "Ptn", "Ramp3", "Rbp1", "Rgcc", "Rhoc", "Trp53i11")
+
+stalk.marker <- c("Ackr1", "Aqp1", "C1qtnf9", "Cd36", "Csrp2", "Ehd4", "Fbln5", "Hspb1", "Ligp1", "Il6st", "Jam2", "Lgals3", "Lrg1", "Meox2", "Plscr2", "Sdpr", "Selp", "Spint2", "Tgfbi", "Tgm2", "Tmem176a", "Tmem176b", "Tmem252", "Tspan7", "Vwf")
+
+# read in whole data as plf, DON'T OVERWRITE!!!!
+
+# My feelings is that vevous responses precedes arterial responses in the event of MI and I hope to find some evidence either in all ECs or in proliferative ECs. The method used here is the AUCell.
+# Load count data
+exprMatrix <- plf@assays$integrated@data
+exprMatrix <- as.matrix(exprMatrix) # convert sparse matrix to matrix
+dim(exprMatrix)
+
+# Set gene set
+artery.geneSets <- GeneSet(as.character(artery.marker), setName = "Arterial_ECs")
+artery.geneSets
+
+capillary.geneSets <- GeneSet(as.character(capillary.marker), setName = "Capillary_ECs")
+capillary.geneSets
+
+vein.geneSets <- GeneSet(as.character(vein.marker), setName = "Venous_ECs")
+vein.geneSets
+
+# Build gene expression rankings for each cell
+detectCores()
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores = 2, plotStats = TRUE)
+cells_rankings
+save(cells_rankings, file = "EC_rankings.RData")
+
+# Calculate enrichment for the gene signatures (AUC)
+A.cells_AUC <- AUCell_calcAUC(artery.geneSets, cells_rankings)
+C.cells_AUC <- AUCell_calcAUC(capillary.geneSets, cells_rankings)
+V.cells_AUC <- AUCell_calcAUC(vein.geneSets, cells_rankings)
+
+# add AUC score to the MI object
+plf@meta.data$artery_AUC_score <- t(getAUC(A.cells_AUC))
+save(A.cells_AUC, file = "artery_EC_AUC.RData")
+
+plf@meta.data$capillary_AUC_score <- t(getAUC(C.cells_AUC))
+save(C.cells_AUC, file = "capillary_EC_AUC.RData")
+
+plf@meta.data$vein_AUC_score <- t(getAUC(V.cells_AUC))
+save(V.cells_AUC, file = "vein_EC_AUC.RData")
+
+# Determine the cells with the given gene signatures or active gene sets
+set.seed(123)
+A.cells_assignment <- AUCell_exploreThresholds(A.cells_AUC, plotHist = TRUE, assign = TRUE)
+A.cells_assignment$Arterial_proliferative_ECs$aucThr$thresholds # 0.2 seems a good threshold
+
+C.cells_assignment <- AUCell_exploreThresholds(C.cells_AUC, plotHist = TRUE, assign = TRUE)
+C.cells_assignment$Capillary_proliferative_ECs$aucThr$thresholds # L_k2 seems a good threshold [3, 1]
+
+V.cells_assignment <- AUCell_exploreThresholds(V.cells_AUC, plotHist = TRUE, assign = TRUE)
+V.cells_assignment$Venous_proliferative_ECs$aucThr$thresholds # L_k2 seems a good threshold [3, 1]
+
+# AUCscore as ridge plot
+# col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+
+RidgePlot(plf, features = c("artery_AUC_score", "capillary_AUC_score", "vein_AUC_score"), same.y.lims = TRUE, group.by = "age", cols = col.touse)
+
+# AUCscore as feature plot
+pa <- FeaturePlot(plf, features = c("artery_AUC_score"), cols = viridis::viridis(21), split.by = "age", pt.size = 2) + NoLegend()
+
+pc <- FeaturePlot(plf, features = c("capillary_AUC_score"), cols = viridis::inferno(21), split.by = "age", pt.size = 2) + NoLegend()
+
+pv <- FeaturePlot(plf, features = c("vein_AUC_score"), cols = viridis::cividis(21), split.by = "age", pt.size = 2) + NoLegend()
+
+FeaturePlot(plf, features = c("artery_AUC_score", "capillary_AUC_score"), split.by = "age", blend = TRUE, cols = c("white", "blue", "red")) & NoLegend() & NoAxes()
+
+# The feature plots doesn't really show the difference between groups that well so replot in plotly
+# col.touse <- c("#88CCEE", "#117733", "#332288", "#CC6677", "#882255", "#AA4499")
+# extract useful columns
+score <- plf@meta.data[, c(1:8, 62:64)]
+# score <- plf@meta.data[, c(1:8, 12, 32:34)] # for the whole dataset
+# use 'download as png' to save
+plot_ly(score, y = ~ artery_AUC_score, color = ~ age, type = "box", colors = col.touse, width = 500, height = 500, line = list(color = "black")) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Age", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Arterial_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+# wilcox test
+res <- wilcox.test(artery_AUC_score ~ age, data = score)
+res
+
+plot_ly(score, y = ~ capillary_AUC_score, color = ~ age, type = "box", colors = col.touse, width = 500, height = 500, line = list(color = "black")) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Age", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Capillary_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+# wilcox test
+res <- wilcox.test(capillary_AUC_score ~ age, data = score)
+res
+
+plot_ly(score, y = ~ vein_AUC_score, color = ~ age, type = "box", colors = col.touse, width = 500, height = 500, line = list(color = "black")) %>% layout(showlegend = F, autosize = F, xaxis = list(title = "Age", tickfont = list(size = 15), titlefont = list(size = 15)), yaxis = list(title = "Venous_AUC_score", tickfont = list(size = 15), titlefont = list(size = 15)), legend = list(font = list(size = 15)))
+# wilcox test
+res <- wilcox.test(vein_AUC_score ~ age, data = score)
+res
+```
+</div>
+
+### Step 12: Comparison between adult healthy EC, fetal EC and HF EC
+<div class = "teal">
+```{r}
+# Seurat find markers functions
+# change idents to newgroup
+integrated@meta.data <- integrated@meta.data %>% mutate(simplegroup = case_when(newgroup == "Normal Fetal" ~ "Normal Fetal", newgroup == "cHF Adult" ~ "HF Adult", newgroup == "dHF Adult" ~ "HF Adult", newgroup == "Normal Adult" ~ "Normal Adult"))
+Idents(integrated) <- "simplegroup"
+Idents(integrated) <- "newgroup"
+# fetal EC vs adult healthy
+marker1 <- FindMarkers(integrated, ident.1 = "Normal Fetal", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list1 <- marker1 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# cHF EC vs adult healthy
+marker2 <- FindMarkers(integrated, ident.1 = "cHF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list2 <- marker2 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# dHF EC vs adult healthy
+marker3 <- FindMarkers(integrated, ident.1 = "dHF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list3 <- marker3 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# HF vs adult healthy
+marker4 <- FindMarkers(integrated, ident.1 = "HF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list4 <- marker4 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+
+# cluster specific approach
+# cluster 0
+Idents(integrated) <- "seurat_clusters"
+rownames(integrated@meta.data) <- colnames(integrated@assays$RNA@counts)
+cluster0 <- subset(integrated, idents = "0")
+# cluster0 <- subset(integrated, idents = "1")
+# cluster0 <- subset(integrated, idents = "2")
+# cluster0 <- subset(integrated, idents = "3")
+# cluster0 <- subset(integrated, idents = "4")
+Idents(cluster0) <- "newgroup"
+# fetal EC vs adult healthy
+marker1 <- FindMarkers(cluster0, ident.1 = "Normal Fetal", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list1 <- marker1 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# cHF EC vs adult healthy
+marker2 <- FindMarkers(cluster0, ident.1 = "cHF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list2 <- marker2 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# dHF EC vs adult healthy
+marker3 <- FindMarkers(cluster0, ident.1 = "dHF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list3 <- marker3 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+### another approach is to find out if there are any overlap between the group markers
+# Normal Fetal marker
+marker1 <- FindMarkers(cluster0, ident.1 = "Normal Fetal", logfc.threshold = 0.25, min.pct = 0.05)
+list1 <- marker1 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# cHF Adult marker
+marker2 <- FindMarkers(cluster0, ident.1 = "cHF Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list2 <- marker2 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# dHF Adult marker
+marker3 <- FindMarkers(cluster0, ident.1 = "dHF Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list3 <- marker3 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# Normal Adult Marker
+marker4 <- FindMarkers(cluster0, ident.1 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list4 <- marker4 %>% filter(p_val_adj < 0.05, avg_logFC < 0) %>% arrange(avg_logFC)
+
+### Approach 3
+## Identify common top marker between fetal and HF EC and check if it's down regulated in the normal
+# Cluster 0
+cluster0 <- subset(integrated, idents = "0")
+# cluster0 <- subset(integrated, idents = "1")
+# cluster0 <- subset(integrated, idents = "2")
+# cluster0 <- subset(integrated, idents = "3")
+# cluster0 <- subset(integrated, idents = "4")
+Idents(cluster0) <- "newgroup"
+# top fetal markers
+marker1 <- FindMarkers(cluster0, ident.1 = "Normal Fetal", logfc.threshold = 0.25, min.pct = 0.05)
+list1 <- marker1 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# top cHF markers
+marker2 <- FindMarkers(cluster0, ident.1 = "cHF Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list2 <- marker2 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# top dHF markers
+marker3 <- FindMarkers(cluster0, ident.1 = "dHF Adult", logfc.threshold = 0.25, min.pct = 0.05)
+list3 <- marker3 %>% filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+# common markers between fetal and cHF
+list1_2 <- intersect(rownames(list1), rownames(list2))
+View(list1_2)
+record <- list1[which(rownames(list1) %in% list1_2), ]
+# common markers between fetal and dHF
+list1_3 <- intersect(rownames(list1), rownames(list2))
+View(list1_3)
+record <- list1[which(rownames(list1) %in% list1_3), ]
+## extract data for the common genes
+df <- GetAssayData()
+df1 <- as.data.frame(df[which(rownames(df) == "NAA25"), ])
+colnames(df1) <- "NAA25"
+df2 <- integrated@meta.data %>% filter(rownames(integrated@meta.data) %in% rownames(df1))
+df3 <- cbind(df1, df2)
+df3 %>% group_by(newgroup) %>% summarise(count = n(), mean = mean(NAA25), sd = sd(NAA25))
+df4 <- df3 %>% group_by(newgroup) %>% select(c(newgroup, NAA25))
+
+# cluster specific approach
+# cluster 0
+
+for (j in unique(Idents(integrated))) {
+  cluster <- subset(integrated, idents = j)
+  Idents(cluster) <- "newgroup"
+  marker <- FindMarkers(cluster, ident.1 = "Normal Fetal", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+  list <- marker %>% dplyr::filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+write.csv(list, file = paste0("cluster", j, "fetal_marker.csv"))
+}
+
+integrated@meta.data <- integrated@meta.data %>% mutate(simplegroup = case_when(newgroup == "cHF Adult" ~ "HF Adult", newgroup == "dHF Adult" ~ "HF Adult", newgroup == "Normal Fetal" ~ "Normal Fetal", newgroup == "Normal Adult" ~ "Normal Adult"))
+
+for (j in unique(Idents(integrated))) {
+  cluster <- subset(integrated, idents = j)
+  Idents(cluster) <- "simplegroup"
+  marker <- FindMarkers(cluster, ident.1 = "HF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+  list <- marker %>% dplyr::filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+write.csv(list, file = paste0("cluster", j, "HF_marker.csv"))
+}
+
+for (j in unique(Idents(integrated))) {
+  cluster <- subset(integrated, idents = j)
+  Idents(cluster) <- "newgroup"
+  marker <- FindMarkers(cluster, ident.1 = "cHF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+  list <- marker %>% dplyr::filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+write.csv(list, file = paste0("cluster", j, "cHF_marker.csv"))
+}
+
+cluster <- subset(integrated, idents = "0")
+  Idents(cluster) <- "simplegroup"
+  marker <- FindMarkers(cluster, ident.1 = "HF Adult", ident.2 = "Normal Adult", logfc.threshold = 0.25, min.pct = 0.05)
+  list <- marker %>% dplyr::filter(p_val_adj < 0.05, avg_logFC > 0) %>% arrange(desc(avg_logFC))
+
+```
+</div>
+
+### Step 13: Module 2 analysis adult healthy EC, fetal EC and HF EC
+<div class = "teal">
+```{r}
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+saveRDS(integrated, file = "integrated.rds")
+Idents(integrated) <- "newgroup"
+
+####################
+## NormalAdult vs NormalFetal
+####################
+# study all cells first
+NormalFetalNormalAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "Normal Fetal", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalFetalNormalAdultAllDEG, file = "NormalFetalNormalAdultAllDEG.csv")
+# top 50
+## downregulated in NormalFetal
+NormalFetalNormalAdultAllDEG_down <- NormalFetalNormalAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalFetalNormalAdultAllDEG_down, file = "downregulated_NormalFetalNormalAdultAllDEG.csv")
+NormalFetalNormalAdultAllDEG_top50_down <- NormalFetalNormalAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalFetalNormalAdultAllDEG_top50_down)
+## upregulated in NormalFetal
+NormalFetalNormalAdultAllDEG_up <- NormalFetalNormalAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalFetalNormalAdultAllDEG_up, file = "upregulated_NormalFetalNormalAdultAllDEG.csv")
+NormalFetalNormalAdultAllDEG_top50_up <- NormalFetalNormalAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalFetalNormalAdultAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalFetalNormalAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(NormalFetalNormalAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+####################
+## cHFAdult vs NormalAdult
+####################
+# study all cells first
+NormalAdultcHFAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "cHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalAdultcHFAdultAllDEG, file = "NormalAdultcHFAdultAllDEG.csv")
+# top 50
+## downregulated in cHF
+NormalAdultcHFAdultAllDEG_down <- NormalAdultcHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalAdultcHFAdultAllDEG_down, file = "downregulated_NormalAdultcHFAdultAllDEG.csv")
+NormalAdultcHFAdultAllDEG_top50_down <- NormalAdultcHFAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultcHFAdultAllDEG_top50_down)
+## upregulated in cHF
+NormalAdultcHFAdultAllDEG_up <- NormalAdultcHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalAdultcHFAdultAllDEG_up, file = "upregulated_NormalAdultcHFAdultAllDEG.csv")
+NormalAdultcHFAdultAllDEG_top50_up <- NormalAdultcHFAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultcHFAdultAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalAdultcHFAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(NormalAdultcHFAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "cHF Adult"), cols = c("red", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "cHF Adult"), cols = c("red", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+####################
+## dHFAdult vs NormalAdult
+####################
+# study all cells first
+NormalAdultdHFAdultAllDEG <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "dHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalAdultdHFAdultAllDEG, file = "NormalAdultdHFAdultAllDEG.csv")
+# top 50
+## downregulated in dHF
+NormalAdultdHFAdultAllDEG_down <- NormalAdultdHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalAdultdHFAdultAllDEG_down, file = "downregulated_NormalAdultdHFAdultAllDEG.csv")
+NormalAdultdHFAdultAllDEG_top50_down <- NormalAdultdHFAdultAllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultdHFAdultAllDEG_top50_down)
+## upregulated in dHF
+NormalAdultdHFAdultAllDEG_up <- NormalAdultdHFAdultAllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalAdultdHFAdultAllDEG_up, file = "upregulated_NormalAdultdHFAdultAllDEG.csv")
+NormalAdultdHFAdultAllDEG_top50_up <- NormalAdultdHFAdultAllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultdHFAdultAllDEG_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalAdultdHFAdultAllDEG_top50_up)[1:10]
+feature_down <- rownames(NormalAdultdHFAdultAllDEG_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "dHF Adult"), cols = c("darkred", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "dHF Adult"), cols = c("darkred", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#################################
+## Find the commons between three
+#################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDEG_down AdultHealthyAdultMI1DAllDEG_down AdultHealthyAdultMI3DAllDEG_down AdultHealthyAdultMI7DAllDEG_down AdultHealthyAdultMI2WAllDEG_down AdultHealthyAdultMI4WAllDEG_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_down), rownames(NormalAdultcHFAdultAllDEG_down), rownames(NormalAdultdHFAdultAllDEG_down)))
+save(common_down, file = "common_down_regulated_genelist_allhuman.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_down),
+  B = rownames(NormalAdultcHFAdultAllDEG_down),
+  C = rownames(NormalAdultdHFAdultAllDEG_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_up), rownames(NormalAdultcHFAdultAllDEG_up), rownames(NormalAdultdHFAdultAllDEG_up)))
+save(common_up, file = "common_up_regulated_genelist_allhuman.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_up),
+  B = rownames(NormalAdultcHFAdultAllDEG_up),
+  C = rownames(NormalAdultdHFAdultAllDEG_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+############################################
+## Find the commons between two: cHF and dHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDEG_down AdultHealthyAdultMI1DAllDEG_down AdultHealthyAdultMI3DAllDEG_down AdultHealthyAdultMI7DAllDEG_down AdultHealthyAdultMI2WAllDEG_down AdultHealthyAdultMI4WAllDEG_down
+common_down <- Reduce(intersect, list(rownames(NormalAdultcHFAdultAllDEG_down), rownames(NormalAdultdHFAdultAllDEG_down)))
+save(common_down, file = "common_down_regulated_genelist_HFs.Rdata")
+
+x1 <- list(
+  #A = rownames(NormalFetalNormalAdultAllDEG_down),
+  B = rownames(NormalAdultcHFAdultAllDEG_down),
+  C = rownames(NormalAdultdHFAdultAllDEG_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalAdultcHFAdultAllDEG_up), rownames(NormalAdultdHFAdultAllDEG_up)))
+save(common_up, file = "common_up_regulated_genelist_HFs.Rdata")
+
+x2 <- list(
+  #A = rownames(NormalFetalNormalAdultAllDEG_up),
+  B = rownames(NormalAdultcHFAdultAllDEG_up),
+  C = rownames(NormalAdultdHFAdultAllDEG_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+uniqueup_cHF <- rownames(NormalAdultcHFAdultAllDEG_up)[rownames(NormalAdultcHFAdultAllDEG_up) %!in% c(rownames(NormalAdultdHFAdultAllDEG_up), common_up)]
+
+uniquedown_cHF <- rownames(NormalAdultcHFAdultAllDEG_down)[rownames(NormalAdultcHFAdultAllDEG_down) %!in% c(rownames(NormalAdultdHFAdultAllDEG_down), common_down)]
+
+uniqueup_dHF <- rownames(NormalAdultdHFAdultAllDEG_up)[rownames(NormalAdultdHFAdultAllDEG_up) %!in% c(rownames(NormalAdultcHFAdultAllDEG_up), common_up)]
+
+uniquedown_dHF <- rownames(NormalAdultdHFAdultAllDEG_down)[rownames(NormalAdultdHFAdultAllDEG_down) %!in% c(rownames(NormalAdultcHFAdultAllDEG_down), common_down)]
+
+############################################
+## Find the commons between two: fetal and cHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDEG_down AdultHealthyAdultMI1DAllDEG_down AdultHealthyAdultMI3DAllDEG_down AdultHealthyAdultMI7DAllDEG_down AdultHealthyAdultMI2WAllDEG_down AdultHealthyAdultMI4WAllDEG_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_down), rownames(NormalAdultcHFAdultAllDEG_down)))
+save(common_down, file = "common_down_regulated_genelist_FetalcHF.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_down),
+  B = rownames(NormalAdultcHFAdultAllDEG_down)
+  #C = rownames(NormalAdultdHFAdultAllDEG_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_up), rownames(NormalAdultcHFAdultAllDEG_up)))
+save(common_up, file = "common_up_regulated_genelist_FetalcHF.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_up),
+  B = rownames(NormalAdultcHFAdultAllDEG_up)
+  #C = rownames(NormalAdultdHFAdultAllDEG_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+############################################
+## Find the commons between two: fetal and dHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDEG_down AdultHealthyAdultMI1DAllDEG_down AdultHealthyAdultMI3DAllDEG_down AdultHealthyAdultMI7DAllDEG_down AdultHealthyAdultMI2WAllDEG_down AdultHealthyAdultMI4WAllDEG_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_down), rownames(NormalAdultdHFAdultAllDEG_down)))
+save(common_down, file = "common_down_regulated_genelist_FetaldHF.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_down),
+  B = rownames(NormalAdultdHFAdultAllDEG_down)
+  #C = rownames(NormalAdultdHFAdultAllDEG_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDEG_up), rownames(NormalAdultdHFAdultAllDEG_up)))
+save(common_up, file = "common_up_regulated_genelist_FetaldHF.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDEG_up),
+  B = rownames(NormalAdultdHFAdultAllDEG_up)
+  #C = rownames(NormalAdultdHFAdultAllDEG_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+uniqueup_dHF <- rownames(NormalAdultdHFAdultAllDEG_up)[rownames(NormalAdultdHFAdultAllDEG_up) %!in% c(rownames(NormalFetalNormalAdultAllDEG_up), common_up)]
+
+uniquedown_dHF <- rownames(NormalAdultdHFAdultAllDEG_down)[rownames(NormalAdultdHFAdultAllDEG_down) %!in% c(rownames(NormalFetalNormalAdultAllDEG_down), common_down)]
+
+uniqueup_fetal <- rownames(NormalFetalNormalAdultAllDEG_up)[rownames(NormalFetalNormalAdultAllDEG_up) %!in% c(rownames(NormalAdultdHFAdultAllDEG_up), common_up)]
+
+uniquedown_fetal <- rownames(NormalFetalNormalAdultAllDEG_down)[rownames(NormalFetalNormalAdultAllDEG_down) %!in% c(rownames(NormalAdultdHFAdultAllDEG_down), common_down)]
+
+top20_uniquedown_fetal <- NormalFetalNormalAdultAllDEG_down %>% filter(rownames(NormalFetalNormalAdultAllDEG_down) %in% uniquedown_fetal) %>% top_n(n = 20, wt = abs(avg_log2FC))
+rownames(top20_uniquedown_fetal)
+```
+</div>
+
+### Step 14: Module 2 analysis adult healthy EC, fetal EC and HF EC Regulon
+<div class = "teal">
+```{r regulon}
+library(dorothea)
+library(viper)
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+## We read Dorothea Regulons for mouse:
+dorothea_regulon_human <- get(data("dorothea_hs", package = "dorothea"))
+dim(dorothea_regulon_human)
+## We obtain the regulons based on interactions with confidence level A, B and C
+regulon <- dorothea_regulon_human %>% dplyr::filter(confidence %in% c("A","B","C"))
+dim(regulon)
+## We compute Viper Scores 
+integrated <- run_viper(integrated, regulon, options = list(method = "scale", minsize = 4, eset.filter = TRUE, cores = 2, verbose = FALSE))
+saveRDS(integrated, file = "integrated.rds")
+## We compute the Nearest Neighbours to perform cluster
+DefaultAssay(integrated) <- "dorothea"
+integrated <- ScaleData(integrated)
+integrated <- RunPCA(integrated, features = rownames(integrated), verbose = FALSE)
+integrated <- FindNeighbors(integrated, dims = 1:30, verbose = FALSE)
+## to determine the resolution
+for (i in 1:20) {
+    integrated <- FindClusters(integrated, resolution = 0.1*i)
+}
+    
+png("Dorothea_clustree.png", res = 300, width = 4000, height = 3000)
+clustree(integrated) # cluster tree visualisation
+dev.off()
+png("Dorothea_clustree_stability.png", res = 300, width = 4000, height = 3000)
+clustree(integrated, node_colour = "sc3_stability") # cluster tree visualisation
+dev.off()
+
+## 1.0 is a good resolution
+integrated <- FindClusters(integrated, resolution = 1.0, verbose = FALSE)
+set.seed(1234)
+integrated <- RunUMAP(integrated, dims = 1:30, umap.method = "uwot", metric = "cosine")
+DimPlot(integrated)
+# I build a new data frame using the UMAP coordinates and the metadata.
+df <- cbind(integrated@reductions$umap@cell.embeddings, integrated@meta.data)
+# Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+  family = "Open Sans",
+  size = 13,
+  color = 'black')
+
+## group
+colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
+df$newgroup <- factor(df$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ newgroup, colors = colours, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+## cluster
+p2 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = RColorBrewer::brewer.pal(8, "Set3"),marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# pie chart df
+
+dfy <- df %>% group_by(seurat_clusters) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
+## pie chart
+Idents(integrated) <- "seurat_clusters"
+figy_pie <- plot_ly(dfy, labels = ~ seurat_clusters, values = ~ percentage, type = 'pie', marker = list(colors = RColorBrewer::brewer.pal(8, "Set3"), line = list(color = '#FFFFFF', width = 1)), textfont = list(size = 24), insidetextorientation = "radial")
+
+#########################
+## tf cluster composition
+#########################
+### select the feature to analyse
+meta_to_use <- integrated@meta.data[, c("newgroup", "seurat_clusters")]
+# summarise the parametres
+summary <- meta_to_use %>% group_by(newgroup, seurat_clusters) %>% tally()
+summary <- as.data.frame(summary)
+# number of cells in each group
+group_number <- as.data.frame(meta_to_use %>% group_by(newgroup) %>% tally())
+# calculate the percentage of cells in each cluster
+summary <- summary %>% mutate (percentage = case_when(newgroup == "cHF Adult" ~ n/group_number[1, 2]*100, newgroup == "dHF Adult" ~ n/group_number[2, 2]*100, newgroup == "Normal Adult" ~ n/group_number[3, 2]*100, newgroup == "Normal Fetal" ~ n/group_number[4, 2]*100))
+# normalise percentage data
+summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
+summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100))
+write.csv(summary, file = "tf_cluster_composition.csv")
+# normalised percentage graph
+colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
+summary$newgroup <- factor(summary$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
+p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = newgroup)) + scale_fill_manual(values = colours) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
+ggplotly(p, width = 800, height = 800)
+
+####################
+## NormalAdult vs NormalFetal
+####################
+# study all cells first
+NormalFetalNormalAdultAllDER <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "Normal Fetal", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalFetalNormalAdultAllDER, file = "NormalFetalNormalAdultAllDER.csv")
+# top 50
+## downregulated in NormalFetal
+NormalFetalNormalAdultAllDER_down <- NormalFetalNormalAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalFetalNormalAdultAllDER_down, file = "downregulated_NormalFetalNormalAdultAllDER.csv")
+NormalFetalNormalAdultAllDER_top50_down <- NormalFetalNormalAdultAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalFetalNormalAdultAllDER_top50_down)
+## upregulated in NormalFetal
+NormalFetalNormalAdultAllDER_up <- NormalFetalNormalAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalFetalNormalAdultAllDER_up, file = "upregulated_NormalFetalNormalAdultAllDER.csv")
+NormalFetalNormalAdultAllDER_top50_up <- NormalFetalNormalAdultAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalFetalNormalAdultAllDER_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalFetalNormalAdultAllDER_top50_up)[1:10]
+feature_down <- rownames(NormalFetalNormalAdultAllDER_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Fetal", "Normal Adult"), cols = c("#0000ff", "#bfbfff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+####################
+## cHFAdult vs NormalAdult
+####################
+# study all cells first
+NormalAdultcHFAdultAllDER <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "cHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalAdultcHFAdultAllDER, file = "NormalAdultcHFAdultAllDER.csv")
+# top 50
+## downregulated in cHF
+NormalAdultcHFAdultAllDER_down <- NormalAdultcHFAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalAdultcHFAdultAllDER_down, file = "downregulated_NormalAdultcHFAdultAllDER.csv")
+NormalAdultcHFAdultAllDER_top50_down <- NormalAdultcHFAdultAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultcHFAdultAllDER_top50_down)
+## upregulated in cHF
+NormalAdultcHFAdultAllDER_up <- NormalAdultcHFAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalAdultcHFAdultAllDER_up, file = "upregulated_NormalAdultcHFAdultAllDER.csv")
+NormalAdultcHFAdultAllDER_top50_up <- NormalAdultcHFAdultAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultcHFAdultAllDER_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalAdultcHFAdultAllDER_top50_up)[1:10]
+feature_down <- rownames(NormalAdultcHFAdultAllDER_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "cHF Adult"), cols = c("red", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "cHF Adult"), cols = c("red", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+####################
+## dHFAdult vs NormalAdult
+####################
+# study all cells first
+NormalAdultdHFAdultAllDER <- FindMarkers(integrated, ident.1 = "Normal Adult", ident.2 = "dHF Adult", min.pct = 0.25, verbose = FALSE)
+write.csv(NormalAdultdHFAdultAllDER, file = "NormalAdultdHFAdultAllDER.csv")
+# top 50
+## downregulated in dHF
+NormalAdultdHFAdultAllDER_down <- NormalAdultdHFAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(NormalAdultdHFAdultAllDER_down, file = "downregulated_NormalAdultdHFAdultAllDER.csv")
+NormalAdultdHFAdultAllDER_top50_down <- NormalAdultdHFAdultAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultdHFAdultAllDER_top50_down)
+## upregulated in dHF
+NormalAdultdHFAdultAllDER_up <- NormalAdultdHFAdultAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(NormalAdultdHFAdultAllDER_up, file = "upregulated_NormalAdultdHFAdultAllDER.csv")
+NormalAdultdHFAdultAllDER_top50_up <- NormalAdultdHFAdultAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(NormalAdultdHFAdultAllDER_top50_up)
+
+# plot up and down regulated genes
+feature_up <- rownames(NormalAdultdHFAdultAllDER_top50_up)[1:10]
+feature_down <- rownames(NormalAdultdHFAdultAllDER_top50_down) [1:10]
+p_up <- VlnPlot(integrated, features = c(feature_up), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "dHF Adult"), cols = c("darkred", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+p_down <- VlnPlot(integrated, features = c(feature_down), pt.size = 0, split.by = "newgroup", idents = c("Normal Adult", "dHF Adult"), cols = c("darkred", "#0000ff"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)  + theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+#################################
+## Find the commons between three
+#################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDER_down AdultHealthyAdultMI1DAllDER_down AdultHealthyAdultMI3DAllDER_down AdultHealthyAdultMI7DAllDER_down AdultHealthyAdultMI2WAllDER_down AdultHealthyAdultMI4WAllDER_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_down), rownames(NormalAdultcHFAdultAllDER_down), rownames(NormalAdultdHFAdultAllDER_down)))
+save(common_down, file = "common_down_regulated_regulons_allhuman.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_down),
+  B = rownames(NormalAdultcHFAdultAllDER_down),
+  C = rownames(NormalAdultdHFAdultAllDER_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_up), rownames(NormalAdultcHFAdultAllDER_up), rownames(NormalAdultdHFAdultAllDER_up)))
+save(common_up, file = "common_up_regulated_regulons_allhuman.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_up),
+  B = rownames(NormalAdultcHFAdultAllDER_up),
+  C = rownames(NormalAdultdHFAdultAllDER_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+############################################
+## Find the commons between two: cHF and dHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDER_down AdultHealthyAdultMI1DAllDER_down AdultHealthyAdultMI3DAllDER_down AdultHealthyAdultMI7DAllDER_down AdultHealthyAdultMI2WAllDER_down AdultHealthyAdultMI4WAllDER_down
+common_down <- Reduce(intersect, list(rownames(NormalAdultcHFAdultAllDER_down), rownames(NormalAdultdHFAdultAllDER_down)))
+save(common_down, file = "common_down_regulated_regulons_HFs.Rdata")
+
+x1 <- list(
+  #A = rownames(NormalFetalNormalAdultAllDER_down),
+  B = rownames(NormalAdultcHFAdultAllDER_down),
+  C = rownames(NormalAdultdHFAdultAllDER_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalAdultcHFAdultAllDER_up), rownames(NormalAdultdHFAdultAllDER_up)))
+save(common_up, file = "common_up_regulated_regulons_HFs.Rdata")
+
+x2 <- list(
+  #A = rownames(NormalFetalNormalAdultAllDER_up),
+  B = rownames(NormalAdultcHFAdultAllDER_up),
+  C = rownames(NormalAdultdHFAdultAllDER_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+############################################
+## Find the commons between two: fetal and cHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDER_down AdultHealthyAdultMI1DAllDER_down AdultHealthyAdultMI3DAllDER_down AdultHealthyAdultMI7DAllDER_down AdultHealthyAdultMI2WAllDER_down AdultHealthyAdultMI4WAllDER_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_down), rownames(NormalAdultcHFAdultAllDER_down)))
+save(common_down, file = "common_down_regulated_regulons_FetalcHF.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_down),
+  B = rownames(NormalAdultcHFAdultAllDER_down)
+  #C = rownames(NormalAdultdHFAdultAllDER_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_up), rownames(NormalAdultcHFAdultAllDER_up)))
+save(common_up, file = "common_up_regulated_regulons_FetalcHF.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_up),
+  B = rownames(NormalAdultcHFAdultAllDER_up)
+  #C = rownames(NormalAdultdHFAdultAllDER_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+############################################
+## Find the commons between two: fetal and dHF
+############################################
+# FIND THE COMMONLY UPREGULATED AND DOWNREGULATED TFS
+# Venn graph for the common up or down regulated genes
+##### !!!library("ggVennDiagram") can't handle more than 4 dimensions !!!######
+## 5-way Venn diagram
+#library(systemPipeR)
+library(ggVennDiagram)
+# P6P2MI3WAllDER_down AdultHealthyAdultMI1DAllDER_down AdultHealthyAdultMI3DAllDER_down AdultHealthyAdultMI7DAllDER_down AdultHealthyAdultMI2WAllDER_down AdultHealthyAdultMI4WAllDER_down
+common_down <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_down), rownames(NormalAdultdHFAdultAllDER_down)))
+save(common_down, file = "common_down_regulated_regulons_FetaldHF.Rdata")
+
+x1 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_down),
+  B = rownames(NormalAdultdHFAdultAllDER_down)
+  #C = rownames(NormalAdultdHFAdultAllDER_down)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p1 <- ggVennDiagram(x1, label_alpha = 0, label = "count")
+
+common_up <- Reduce(intersect, list(rownames(NormalFetalNormalAdultAllDER_up), rownames(NormalAdultdHFAdultAllDER_up)))
+save(common_up, file = "common_up_regulated_regulons_FetaldHF.Rdata")
+
+x2 <- list(
+  A = rownames(NormalFetalNormalAdultAllDER_up),
+  B = rownames(NormalAdultdHFAdultAllDER_up)
+  #C = rownames(NormalAdultdHFAdultAllDER_up)
+  )
+#vennset1 <- overLapper(x1, type = "vennsets")
+#vennPlot(vennset1)
+#olBarplot(vennset1, mincount=1)
+p2 <- ggVennDiagram(x2, label_alpha = 0, label = "count")
+
+####################
+## Uninjured vs Injured
+####################
+# study all cells first
+DefaultAssay(integrated) <- "dorothea"
+Idents(integrated) <- "newcondition"
+UninjuredInjuredAllDER <- FindMarkers(integrated, ident.1 = "Uninjured", ident.2 = "Injured", min.pct = 0.25, verbose = FALSE)
+write.csv(UninjuredInjuredAllDER, file = "UninjuredInjuredAllDER.csv")
+# top 50
+## downregulated in Uninjured
+UninjuredInjuredAllDER_down <- UninjuredInjuredAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+write.csv(UninjuredInjuredAllDER_down, file = "downregulated_UninjuredInjuredAllDER.csv")
+UninjuredInjuredAllDER_top50_down <- UninjuredInjuredAllDER_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(UninjuredInjuredAllDER_top50_down)
+feature_down <- UninjuredInjuredAllDER_top50_down$X[1:10]
+VlnPlot(integrated, features = feature_down, pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+
+## upregulated in Uninjured
+UninjuredInjuredAllDER_up <- UninjuredInjuredAllDER %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+write.csv(UninjuredInjuredAllDER_up, file = "upregulated_UninjuredInjuredAllDER.csv")
+UninjuredInjuredAllDER_top50_up <- UninjuredInjuredAllDER_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+View(UninjuredInjuredAllDER_top50_up)
+feature_up <- UninjuredInjuredAllDER_top50_up$X[1:10]
+VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+
+#######################
+### Find cluster marker
+#######################
+# Apparently FindAllMarkers only work for RNA assay, not for dorothea
+# Only plot cluster regulons here
+# plot conserved markers
+cluster0_feature <- c("FOSL1", "ZBED1", "FLI1", "ESR2", "ATF2", "MYC") # "FOSL1"
+cluster1_feature <- c("HNF1A", "TP63", "NR2F2", "HNF4A", "MBD2", "HBP1") # "HNF1A"
+cluster2_feature <- c("NFATC1", "TFDP1", "BACH2", "RUNX3", "XBP1", "OTX2", "TCF7") # "NFATC1"
+cluster3_feature <- c("NR2F2", "MYOD1", "SRF", "ELF3", "FOS", "GATA4", "PPARG", "PPARA") # "NR2F2"
+cluster4_feature <- c("SOX11", "FOXO1", "RUNX1", "LYL1") # "SOX11"
+cluster5_feature <- c("SPI1", "GATA1", "IKZF1", "FOS", "RFX5", "CREB1") # "SPI1"
+cluster6_feature <- c("SP1", "HHEX", "MYC", "CREM", "RARA", "CREB3", "TFAP2A") # "SP1"
+cluster7_feature <- c("POU4F2", "SOX6", "EBF1", "POU5F1", "GATA6") # "POU4F2" 
+# check and pick the best cluster-specific marker  
+p1 <- VlnPlot(integrated, features = cluster0_feature, pt.size = 0)
+# plot the top markers
+markers.to.plot <- c("FOSL1", "HNF1A", "NFATC1", "NR2F2", "SOX11", "SPI1", "SP1", "POU4F2")
+p2 <- DotPlot(integrated, features = rev(markers.to.plot), cols = c("blue", "red"), split.by = "newcondition", dot.scale = 5) + RotatedAxis()
+p3 <- VlnPlot(integrated, features = markers.to.plot, pt.size = 0, split.by = "newcondition", cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+Idents(integrated) <- "seurat_clusters"
+p4 <- VlnPlot(integrated, features = markers.to.plot, pt.size = 0, same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10) + theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5))
+p5 <- DotPlot(integrated, features = rev(markers.to.plot), cols = c("navy", "plum1"), dot.scale = 5) + RotatedAxis()
+ggplotly(p5, width = 500, height = 600)
+```
+</div>
+
+### Step 15: Metagene
+<div class = "teal">
+```{r scrat}
+### use integrated data
+DefaultAssay(integrated) <- "RNA"
+df1 <- as.matrix(integrated@assays$RNA@data)
+#save(df1, file = "data_for_scrat.RData")
+write.csv(df1, file = "data_for_scrat.csv")
+integrated@meta.data <- integrated@meta.data %>% mutate(color = case_when(newgroup == "Normal Fetal" ~ "#bfbfff", newgroup == "Normal Adult" ~ "blue", newgroup == "cHF Adult" ~ "red", newgroup == "dHF Adult" ~ "red"))
+df2 <- data.frame(cell_id = colnames(df1), experiment = "Human_Meta", assignment_LB = integrated@meta.data$newgroup, color = integrated@meta.data$color, row.names = colnames(df1))
+#dfFinal <- cbind(df2, df1)
+#dfFinal[1:5, 1:5] # check the input is ready
+# Assign groups and colors
+SOM.assign <- as.character(df2$assignment_LB)
+SOM.color <- as.character(df2$color)
+Idents(integrated) <- "newgroup"
+#dfFinal <- t(dfFinal) 
+# Set up the environment
+env <- scrat.new(list(dataset.name = "Human_meta",
+                      dim.1stLvlSom = 50,
+                      dim.2ndLvlSom = 20,
+                      training.extension = 1,
+                      rotate.SOM.portraits = 0,
+                      flip.SOM.portraits = F,
+                      database.dataset = "hsapiens_gene_ensembl",
+                      database.id.type = "hgnc_symbol",
+                      geneset.analysis = T,
+                      geneset.analysis.exact = F,
+                      spot.coresize.modules = 3,
+                      spot.threshold.modules = 0.95,
+                      spot.coresize.groupmap = 5,
+                      spot.threshold.groupmap = 0.75,
+                      pseudotime.estimation = list(
+                              n.waypoints = 20,
+                              n.iterations = 20,
+                              k = 30,
+                              I = 5,
+                              initiator.sample = "Normal Adult"),
+                      feature.centralization = T,
+                      sample.quantile.normalization = T,
+                      pairwise.comparison.list = list()))
+# env setup nicely done
+# Load input datainto environment
+#env$indata <- dfFinal # check
+env$indata <- df1 # check
+# Define sample groups
+env$group.labels <- SOM.assign
+#env$group.labels <-"auto"
+# Define sample colors(optional)
+env$group.colors <- SOM.color # check
+#env$group.colors<-c("col1","col2",...)[match(env$group.labels, unique(env$group.labels))
+# Pipeline execution
+scrat.run(env) # for HTTP error just load the Biomart library
+# the pipeline is successful with the counts data
+```
+</div>
+
+### Step 16: looking at vessel type
+06 May 2021
+<div class = "teal">
+```{r scrat}
+# vessel type
+## isolate cluster 1, 2, 4 as the angiogenic cells to plot the genes 
+Idents(integrated) <- "seurat_clusters"
+levels(integrated)
+angio <- subset(integrated, idents = c("1", "2", "4"))
+DefaultAssay(angio)
+angio <- NormalizeData(angio)
+DefaultAssay(angio) <- "RNA"
+Idents(angio) <- "group"
+Idents(angio) <- "seurat_clusters"
+levels(angio)
+saveRDS(angio, file = "angio.rds")
+
+## angio
+
+angio.df <- cbind(angio@reductions$umap@cell.embeddings, angio@meta.data)
+
+#[1] "#F8766D" "#CD9600" "#7CAE00" "#00BE67" "#00BFC4" "#00A9FF"
+#[7] "#C77CFF" "#FF61CC"
+
+angio.p <- plot_ly(data = angio.df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = further.colour, marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+angio.vein <- plot_ly(data = angio.df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ as.numeric(vein_AUC_score), colors = viridisLite::viridis(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+angio.artery <- plot_ly(data = angio.df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ as.numeric(artery_AUC_score), colors = viridisLite::viridis(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+angio.capillery <- plot_ly(data = angio.df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ as.numeric(capillery_AUC_score), colors = viridisLite::viridis(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+#########################################
+#########################################
+# 06052021 change "Normal" to "Uninjured"
+DefaultAssay(integrated) <- "RNA"
+integrated <- NormalizeData(integrated)
+
+# overall DEG
+Idents(integrated) <- "newcondition"
+AllDEG <- FindMarkers(integrated, ident.1 = "Uninjured", ident.2 = "Injured", min.pct = 0.25, verbose = FALSE)
+write.csv(AllDEG, file = "DEG_newcondition.csv")
+
+# top 50
+## downregulated in injured
+AllDEG_down <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC > 0)
+AllDEG_top50_down <- AllDEG_down %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_down, file = "top50_downregulated_DEG_newcondition.csv")
+## upregulated in injured
+AllDEG_up <- AllDEG %>% dplyr::filter (p_val_adj < 0.05, avg_log2FC < 0)
+AllDEG_top50_up <- AllDEG_up %>% top_n(n = 50, wt = abs(avg_log2FC))
+write.csv(AllDEG_top50_up, file = "top50_upregulated_DEG_newcondition.csv")
+
+feature_up <- rownames(AllDEG_top50_up)[1:10]
+feature_down <- rownames(AllDEG_top50_down)[1:10] 
+
+# [1] "RP11-777B9.5"  "AP000251.3"    "MTRNR2L12"    
+# [4] "MTRNR2L3"      "MTATP8P1"      "MTND6P3"      
+# [7] "MTRNR2L11"     "CH507-513H4.5" "RP11-475J5.4" 
+# [10] "MTRNR2L8"
+
+# [1] "FTH1"   "GAPDH"  "EEF1A1" "ACTB"   "RPS26"  "HBG2"  
+# [7] "RPS23"  "RPL10"  "TUBA1B" "RPL30" 
+
+VlnPlot(integrated, features = feature_up, pt.size = 0, split.by = "newcondition", ncol = 6, cols = c("red", "blue"), same.y.lims = TRUE, stack = TRUE, flip = TRUE, y.max = 10)
+
+# try remake the datafrme to using a different plotting package
+gene_expression <- as.data.frame(t(integrated@assays$RNA@data[feature_down, ]))
+#gene_expression <- as.data.frame(t(integrated@assays$RNA@data[feature_down, ]))
+cell_metadata <- integrated@meta.data$newcondition
+cell_embedding <- integrated@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+new_dataframe$cell_metadata <- factor(cell_metadata, levels = c("Uninjured", "Injured"))
+
+# uninjured
+p1 <- plot_ly(data = new_dataframe[cell_metadata == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ ACTB, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# injured
+p2 <- plot_ly(data = new_dataframe[cell_metadata == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ ACTB, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+#############################
+# common marker plotting
+markers <- c("FTH1", "MSRB3", "MYH6", "MTATP8P1", "SMARCA4", "KANK2", "MYL7", "DOCK6", "NOTCH3", "SYNE3", "CANX","B2M", "ACTA1", "APOD", "RPL39", "RPL11", "PTMA", "RPS11", "FN1", "NAP1L1", "EFNB2", "RPL10AP6", "LTBP4", "CCDC80", "CCL2")
+
+markers <- c("FOXP1", "FOXL2", "FOXA2", "GATA4", "SOX6", "CLOCK", "NFKB1", "STAT1", "RELA", "CEBPB", "STAT3", "ESR1", "REL", "RELB", "JUN", "POU2F2", "SPI1", "HNF4A", "HNF1B", "BHLHE40")
+
+integrated@meta.data <- integrated@meta.data %>% mutate(newgroup = case_when(newgroup == "Normal Fetal" ~ "Uninjured fetal", newgroup == "Normal Adult" ~ "Uninjured adult", newgroup == "cHF Adult" ~ "cHF adult", newgroup == "dHF Adult" ~ "dHF adult"))
+saveRDS(integrated, file = "integrated.rds")
+
+integrated@meta.data$newgroup <- factor(integrated@meta.data$newgroup, levels = c("Uninjured fetal", "Uninjured adult", "cHF adult", "dHF adult"))
+
+DotPlot(integrated, features = markers, group.by = "newgroup", cols = c("Navy", "Plum1")) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+############################
+feature_up <- c("RFX", "NR2F2", "PDX1", "PPARA", "TP73", "POU5F1", "NFKB1", "BACH1", "STAT1", "IRF4")
+feature_down <- c("MYC", "ZNF263", "CEBPD", "TFAP2C", "BCL6", "FOXP1", "MAF", "ZKSCAN1", "GATA1", "PAX6")
+DefaultAssay(integrated) <- "dorothea"
+# plotting for regulon
+# try remake the datafrme to using a different plotting package
+gene_expression <- as.data.frame(t(integrated@assays$dorothea@data[feature_down, ]))
+
+gene_expression <- as.data.frame(t(integrated@assays$dorothea@data[feature_down, ]))
+cell_metadata <- integrated@meta.data$newcondition
+cell_embedding <- integrated@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+new_dataframe$cell_metadata <- factor(cell_metadata, levels = c("Uninjured", "Injured"))
+
+# uninjured
+p1 <- plot_ly(data = new_dataframe[cell_metadata == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ MYC, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# injured
+p2 <- plot_ly(data = new_dataframe[cell_metadata == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ MYC, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+############
+############
+# last markers
+combined@meta.data <- combined@meta.data %>% mutate(condition = case_when(condition == "Normal" ~ "Uninjured", condition == "Injured" ~ "Injured", condition == "Uninjured" ~ "Uninjured"))
+combined@meta.data <- combined@meta.data %>% mutate(combined_condition = paste0(species, " ",condition))
+saveRDS(combined, file = "combined.rds")
+markers <- c("Klf4", "Gas6", "Tsc22d3")
+FeaturePlot(combined, features = markers, split.by = "combined_condition")
+
+gene_expression <- as.data.frame(t(combined@assays$RNA@data[markers, ]))
+cell_metadata <- combined@meta.data$combined_condition
+cell_embedding <- combined@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+new_dataframe$cell_metadata <- factor(cell_metadata, levels = c("Mouse Uninjured", "Mouse Injured", "Human Uninjured", "Human Injured"))
+
+# Mouse Uninjured
+p1 <- plot_ly(data = new_dataframe[cell_metadata == "Mouse Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# Mouse Injured
+p2 <- plot_ly(data = new_dataframe[cell_metadata == "Mouse Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# Human Uninjured
+p3 <- plot_ly(data = new_dataframe[cell_metadata == "Human Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+# Human Injured
+p4 <- plot_ly(data = new_dataframe[cell_metadata == "Human Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, colors = viridisLite::magma(20), marker = list(size = 10, line = list(color = "black", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+```
+</div>
+
+### Step 17 lncRNA check and functions
+```{r lncRNA_check, message = FALSE, warning = FALSE}
+# this only gives biotype but not the functionality
+lnc_data <- read.csv2("lncrnakb.csv")
+head(lnc_data)
+```
+
+### Step 18 replotting with different colour for combined mouse and human data 15 Jun 2021
+```{r merged_data_plotting, message = FALSE, warning = FALSE}
+combined@meta.data <- combined@meta.data %>% mutate(newgroup = case_when(newgroup == "Mouse P6 Uninjured" ~ "Mouse P6 Uninjured", newgroup == "Mouse P10 Uninjured" ~ "Mouse P10 Uninjured", newgroup == "Mouse Adult Healthy" ~ "Mouse Adult Uninjured", newgroup == "Mouse P2 MI3W" ~ "Mouse P2 MI21D", newgroup == "Mouse Adult MI1D" ~ "Mouse Adult MI1D", newgroup == "Mouse Adult MI3D" ~ "Mouse Adult MI3D", newgroup == "Mouse Adult MI7D" ~ "Mouse Adult MI7D", newgroup == "Mouse Adult MI2W" ~ "Mouse Adult MI14D", newgroup == "Mouse Adult MI4W" ~ "Mouse Adult MI28D", newgroup == "Human Fetal Uninjured" ~ "Human Fetal Uninjured", newgroup == "Human Adult Uninjured" ~ "Human Adult Uninjured", newgroup == "Human Adult cHF" ~ "Human Adult cHF", newgroup == "Human Adult dHF" ~ "Human Adult dHF"))
+
+combined$newgroup <- factor(combined$newgroup, levels = c("Mouse P6 Uninjured", "Mouse P10 Uninjured", "Mouse P2 MI21D", "Mouse Adult Uninjured", "Mouse Adult MI1D", "Mouse Adult MI3D", "Mouse Adult MI7D", "Mouse Adult MI14D", "Mouse Adult MI28D", "Human Fetal Uninjured", "Human Adult Uninjured", "Human Adult cHF", "Human Adult dHF"))
+
+mouse_human_common_up_genes <- c("Jun", "Sparcl1", "Cd74", "Hspa1a", "Dnajb1", "Itga6", "Fosb", "Egr1", "B2m", "Zfp36", "H2-T23", "Ddx3y", "Btf3", "Timp3", "Rps4x", "Klf4", "Capg", "Apold1", "H2-K1", "H2-D1", "Ccdc85b", "H2-Q4", "Hsp90aa1", "Hes1", "Adamts1", "Slfn5", "Cdkn1a", "Ier5", "Jund", "Fos", "Cebpd", "Zfp36l2", "Nfkbia", "Gimap6", "Tinagl1", "Rhob", "Tsc22d1", "Ets1", "Gas6", "Tsc22d3", "Tmod3", "Ubc", "H3f3b", "H3f3a")
+
+mouse_human_common_down_genes <- c("Col3a1", "Aes", "Calcrl", "Ckap4", "Fhl2", "Rtn3", "Lims1", "Lama4", "Plscr4", "Lamc1", "Lamb1", "Uqcr11", "Nid1")
+
+DefaultAssay(combined) <- "RNA"
+combined <- NormalizeData(combined)
+Idents(combined) <- "newgroup"
+
+# plot DEGs
+DotPlot(combined, features = mouse_human_common_up_genes, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+DotPlot(combined, features = mouse_human_common_down_genes, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+newlist <- c("Sox18", "Rbpms", "Hspa8", "Rps28", "Nedd9", "Cdh13", "Slc25a4", "Nptn", "Wwc2", "Prkch", "Eef1g", "Ube2k", "Tsc22d3", "Rps6", "Actg1", "Mat2a", "Oaz1", "Adam15", "Eef2", "Foxn3", "Pecam1", "Ctsd", "Mmp15", "Cav2", "Igfbp7", "Sdpr", "Malat1", "Btnl9")
+
+DefaultAssay(combined) <- "dorothea"
+
+mouse_human_common_up_regulons <- c("Nfkb1", "Bach1", "Stat1", "Twist1", "Rela", "Ets2", "Klf4", "Foxo4", "Smad4", "Irf1", "Egr1", "Atf2", "Hsf1", "Vdr", "Nfic", "Elk1", "E2f1", "Stat3", "Fli1", "Arntl", "Wt1")
+
+mouse_human_common_down_regulons <- c("Tfap2c", "Pax6", "Foxa2", "Klf13", "Gata3")
+
+# plot DERs
+DotPlot(combined, features = mouse_human_common_up_regulons, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "turquoise1")) + theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+DotPlot(combined, features = mouse_human_common_down_regulons, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "turquoise1")) + theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# for comment on cass paper working version 24052021_MB_2
+list <- c("Mylip", "Gm17660", "Anks1b", "Asxl3", "Chl1", "Dlgap1", "Nkain2", "Dgkb", "Rps27rt", "Gm26694", "Comt", "Car1", "Auts2", "Shfm1", "Ntm", "Ctla4", "Skap1", "Pde1c", "Mllt4", "Ftl1")
+
+list1 <- c("Sox18", "Rbpms", "Hspa8", "Rps28", "Gm26917", "Sdpr")
+
+list2 <- c("Sox18", "Rbpms", "Rpl3", "Hspa8", "Rps28", "Nedd9", "Cdh13", "Slc25a4", "Rpl6", "H2afj", "H2-D1", "Nptn", "Gm26917", "Wwc2", "Prkch", "Eef1g", "Ube2k", "Tsc22d3", "Rps6", "Rpl10a", "Gpi1", "Actg1", "Mat2a", "Oaz1", "Adam15", "Eef2", "Foxn3", "Pecam1", "Ctsd", "Mmp15", "Cav2", "Rhob", "Igfbp7")
+
+DotPlot(combined, features = list, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### Step 19 Exploring cardiac myofibrillar gene expression
+
+```{r cardiac_myofibrillar_genes, warning = FALSE, message = FALSE}
+CMF.genes <- c("Mb", "Tnni3", "Actc1", "Tnnt2", "Myh6", "Tnnc1", "Ttn", "Actn2", "Ryr2", "Myom2", "Myl4", "Myl7")
+DotPlot(combined, features = CMF.genes, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+### Step 20 DEG calculation tricks
+
+```{r DEG, warning = FALSE, message = FALSE}
+FoldChange(mouse_integrated, ident.1 = "Adult MI1D", ident.2 = "uninjured adult", features = c("Ptgs2", "Ccl7", "Lgals3", "Wfdc17", "Ctss", "Tyrobp", "Fcer1g", "Il1b", "Ccl9", "Lilr4b", "Htra3", "Ccl6", "C1qb", "Cxcl12", "Gpx3", "Cd52", "Mafb", "Ctsc", "Cd44", "Pf4"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI3D", ident.2 = "uninjured adult", features = c("Dnaja1", "Klf2", "Cd151", "Psap", "Hspa1a", "Tuba1b", "Ahsa1", "Ptges3", "Xbp1"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI7D", ident.2 = "uninjured adult", features = c("Afdn", "Gm11361", "Tlnrd1", "Plaat3", "Fscn1", "Sox18", "Inka1", "Kctd17", "Zfp979", "Schip1", "Col15a1", "Mfsd14a", "4632427E13Rik", "Gm20559", "Pwwp3a", "Prnd", "Plk2", "Aplnr", "Igfbp3"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI14D", ident.2 = "uninjured adult", features = c("Gm10132", "Gm10275", "Gm10288", "Gm10335", "Gm17511", "Gm6472", "Gm7589", "Rps10-ps1", "Rps3a3", "Rpsa-ps10", "Rps3a2", "Gm10123", "Gm22758", "Gm26924", "Gm5428", "Gm7536", "Gm9846", "Gpr116", "Mir682", "Tpm3-rs7"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI28D", ident.2 = "uninjured adult", features = c("Fam71a", "Cryab", "Nbl1", "Mfap5", "Sdc1", "Cxcl1", "Sulf1", "Rgs16", "Pdlim2", "Pi16", "Cystm1", "Hs3st1", "Phlda1", "Klf4", "Tmx4", "Neat1", "Crip1", "Hbegf", "Tppp3", "Gm12216"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI28D", ident.2 = "uninjured adult", features = c("Actb", "Col4a1", "Fli1", "Cd200", "Scarb1", "Plscr2", "Nes", "Fscn1", "Mier1", "Sh3glb1", "Clec14a", "Nrp2", "Afap1l1", "Trp53i11", "Filip1l", "Ttc14", "Slfn2", "Ndufa4"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI14D", ident.2 = "uninjured adult", features = c("Plpp3", "Rpl24", "Hspa1a", "Sumo2", "Plpp1", "Cyb5a", "Saraf", "Smim10l1", "Cracr2b", "Pnisr", "Tinagl1", "Tubb2a", "Uqcc3", "Gna11", "Oaz2", "Lrrc8a", "Slc50a1", "Pls3", "Smpdl3a", "Tsc22d1"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI7D", ident.2 = "uninjured adult", features = c("Tpt1", "Rplp1", "Rps12", "Rps21", "Rps29", "Rps27", "Hsp90ab1", "Rps15", "Rps24", "Fau", "Rps17", "Rps20", "Rplp2", "Rps25", "Rps10", "Crip1", "Klf9", "Aldh2", "Akap12", "Palm"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI3D", ident.2 = "uninjured adult", features = c("Srsf5", "Erh", "Ankrd11", "Mprip", "Sptan1", "Fnbp1l", "Irf1", "Gm12216", "Sema6a", "Hmg20b", "Hist1h1c", "Zfand5", "H1f0", "Slc43a3", "Wnk1", "Pttg1", "Gemin7", "Tanc1", "Dst", "Elf1"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI1D", ident.2 = "uninjured adult", features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof", "Selenok", "Selenom", "Selenop", "Selenow", "Sem1", "Atp6v0c", "Vps28", "Nme2", "Lgals1", "Socs3", "Tmem176b", "Emp1", "Capg", "Ndfip1"))
+
+FoldChange(mouse_integrated, ident.1 = "Adult MI1D", ident.2 = "uninjured adult", features = c("Fabp4", "Ly6c1", "Cd36", "Ly6a", "Gpihbp1", "AW112010", "Mgll", "Sepw1", "Gng11", "Tspan13", "Rbp7", "Tcf15", "Ptrf", "Sepp1", "Rgcc", "Lims2", "Cd300lg", "C1qtnf9", "Gm10260"))
+
+# switch to human now
+FoldChange(human_integrated, ident.1 = "dHF Adult", ident.2 = "Normal Adult", features = c("MTRNR2L7", "RP5-857K21.6", "MTRNR2L13", "JUN"))
+
+# switch to combined now
+combined@meta.data <- combined@meta.data %>% mutate(condition = case_when(condition == "Normal" ~ "Uninjured", condition == "Injured" ~ "Injured", condition == "Uninjured" ~ "Uninjured"))
+
+combined@meta.data <- combined@meta.data %>% mutate(speciescondition = paste0(species, condition))
+saveRDS(combined, file = "combined.rds")
+
+Idents(combined) <- "speciescondition"
+FoldChange(combined, ident.1 = "HumanInjured", ident.2 = "HumanUninjured", features = c("Jun", "Sparcl1", "Cd74", "Hspa1a", "Dnajb1", "Itga6", "Fosb", "Egr1", "B2m", "Zfp36", "H2-T23", "Ddx3y", "Timp3", "Rps4x", "Klf4", "Apold1", "H2-K1", "H2-D1", "H2-Q4", "Hsp90aa1", "Hes1", "Adamts1", "Slfn5", "Cdkn1a", "Ier5", "Jund", "Fos", "Cebpd", "Zfp36l2", "Nfkbia", "Gimap6", "Tinagl1", "Rhob", "Tsc22d1", "Ets1", "Gas6", "Tsc22d3", "Tmod3", "Ubc", "H3f3b", "H3f3a"))
+
+FoldChange(combined, ident.1 = "HumanInjured", ident.2 = "HumanUninjured", features = c("Fth1", "Gapdh", "Gm20889", "Eef1a1", "Actb", "Rps26", "Hbb-y", "Rps23", "Rpl10", "Rpl7"))
+
+FoldChange(combined, ident.1 = "MouseInjured", ident.2 = "MouseUninjured", features = c("1810011O10Rik", "2010107E04Rik", "Actc1", "Fabp3", "Gltscr2", "Gm10073", "Gm9843", "Mb", "Myh6", "Myl2"))
+
+Idents(mouse_integrated) <- "condition"
+FoldChange(mouse_integrated, ident.1 = "Injured", ident.2 = "Normal", features = c("Col3a1", "Aes", "Calcrl", "Ckap4", "Fhl2", "Rtn3", "Lims1", "Lama4", "Plscr4", "Lamc1", "Lamb1", "Uqcr11", "Nid1"))
+
+# switch to human
+Idents(human_integrated) <- "newcondition"
+FoldChange(human_integrated, ident.1 = "Injured", ident.2 = "Uninjured", features = c("HSPA1A", "HLA-E", "HLA-A", "H3F3A", "H3F3B"))
+```
+
+### Step 21 Version 4 plots
+
+```{r plotting v4}
+mouse_integrated@meta.data <- mouse_integrated@meta.data %>% mutate(newgroup = case_when(newgroup == "Neonatal Normal" ~ "Uninjured neonatal", newgroup == "Adult Normal" ~ "Uninjured adult", newgroup == "Neonatal Injured" ~ "Injured neonatal", newgroup == "Adult Injured" ~ "Injured adult"))
+mouse_integrated$newgroup <- factor(mouse_integrated$newgroup, levels = c("Uninjured neonatal", "Injured neonatal", "Uninjured adult", "Injured adult"))
+
+saveRDS(mouse_integrated, file = "mouse_integrated.rds")
+
+list1 <- c("Sox18", "Rbpms", "Hspa8", "Rps28", "Gm26917", "Sdpr")
+
+DotPlot(mouse_integrated, features = list1, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+list2 <- c("Foxj2", "Ehf", "Foxo1")
+
+DotPlot(mouse_integrated, features = list2, group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+### plot the common up and down regulated genes between human and mouse
+combined@meta.data <- combined@meta.data %>% mutate (paperID = case_when(newgroup == "Mouse P6 Uninjured" ~ "Mouse P6 uninjured", newgroup == "Mouse P10 Uninjured" ~ "Mouse P10 uninjured", newgroup == "Mouse Adult Uninjured" ~ "Mouse adult uninjured", newgroup == "Mouse P2 MI21D" ~ "Mouse P2 21 days post MI", newgroup == "Mouse Adult MI1D" ~ "Mouse adult 1 day post MI", newgroup == "Mouse Adult MI3D" ~ "Mouse adult 3 days post MI", newgroup == "Mouse Adult MI7D" ~ "Mouse adult 7 days post MI", newgroup == "Mouse Adult MI14D" ~ "Mouse adult 14 days post MI", newgroup == "Mouse Adult MI28D" ~ "Mouse adult 28 days post MI", newgroup == "Human Fetal Uninjured" ~ "Human fetal uninjured", newgroup == "Human Adult Uninjured" ~ "Human adult uninjured", newgroup == "Human Adult cHF" ~ "Human adult cHF", newgroup == "Human Adult dHF" ~ "Human adult dHF"))
+
+combined$paperID <- factor(combined$paperID, levels = c("Mouse P6 uninjured", "Mouse P10 uninjured", "Mouse P2 21 days post MI", "Mouse adult uninjured", "Mouse adult 1 day post MI", "Mouse adult 3 days post MI", "Mouse adult 7 days post MI", "Mouse adult 14 days post MI", "Mouse adult 28 days post MI", "Human fetal uninjured", "Human adult uninjured", "Human adult cHF", "Human adult dHF"))
+
+combined@meta.data <- combined@meta.data %>% mutate (speciescondition = paste0(species, condition))
+
+combined@meta.data <- combined@meta.data %>% mutate (speciescondition = case_when(speciescondition == "MouseNormal" ~ "Mouse uninjured", speciescondition == "MouseInjured" ~ "Mouse injured", speciescondition == "HumanUninjured" ~ "Human uninjured", speciescondition == "HumanInjured" ~ "Human injured"))
+
+combined@meta.data <- combined@meta.data %>% mutate (speciescondition = case_when(speciescondition == "MouseUninjured" ~ "Mouse uninjured", speciescondition == "MouseInjured" ~ "Mouse injured", speciescondition == "HumanUninjured" ~ "Human uninjured", speciescondition == "HumanInjured" ~ "Human injured"))
+
+combined$speciescondition <- factor(combined$speciescondition, levels = c("Mouse uninjured", "Mouse injured", "Human uninjured", "Human injured"))
+
+saveRDS(combined, file = "combined.rds")
+
+list1 <- c("Cebpd", "Fos", "Jund", "Jun", "Rps4x", "Lgals3bp", "Cd74", "B2m", "Dnaja1", "Zfp36", "Zfp36l2", "Adamts1", "Hes1", "Ubc", "Rhob", "Egr1", "Nfkbia", "Klf2", "Cdkn1a", "Fosb", "Gimap4", "Ier5", "Tsc22d1", "Tmod3", "Hsp90aa1", "Apold1", "Dnajb1", "Nedd9", "Gimap6", "Tsc22d3", "Gas6", "Itga6", "Ddx3y", "Tinagl1", "Ets1", "Timp3", "Slfn5", "Sparcl1", "Klf4", "Sgk1")
+
+DotPlot(combined, features = list1, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+DotPlot(combined, features = list1, group.by = "speciescondition", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+list2 <- c("Aes", "Fhl2", "Col3a1", "Lamb1", "Ckap4", "Nid1", "Lims1", "Lamc1", "Rtn3", "Plscr4", "Calcrl", "Lama4", "Uqcr11")
+
+DotPlot(combined, features = list2, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("midnightblue", "turquoise")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+DotPlot(combined, features = list2, group.by = "speciescondition", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("midnightblue", "turquoise")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# For Klf4, Gas6 and Tsc22d3
+list3 <- c("Klf4", "Gas6", "Tsc22d3")
+DotPlot(combined, features = list3, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# Featureplots for Klf4 in mouse
+FeaturePlot(mouse_integrated, features = "Klf4", split.by = "condition", cols = c("navy", "olivedrab1"), pt.size = 1)
+
+FeaturePlot(mouse_integrated, features = "Klf4", split.by = "condition", cols = viridisLite::viridis(10), pt.size = 1)
+
+FeaturePlot(mouse_integrated, features = c("Vegfa", "Vegfb", "Vegfc", "Vegfd", "Flt4", "Nrp2"), split.by = "condition", cols = viridisLite::magma(10), pt.size = 1)
+
+DotPlot(combined, features = c("Vegfa", "Vegfb", "Vegfc", "Figf", "Flt4", "Nrp2"), group.by = "paperID", scale.min = 0, scale.max = 75, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# 10 Aug 2021
+DotPlot(combined, features = c("Klf1", "Klf2", "Klf3", "Klf4", "Klf5", "Klf6", "Klf7", "Klf8", "Klf9", "Klf10", "Klf11", "Klf12", "Klf13", "Klf14", "Klf15", "Klf16", "Klf17"), group.by = "paperID", scale.min = 0, scale.max = 75, col.min = -5, col.max = 5, cols = c("navy", "olivedrab1")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+df <- cbind(mouse_integrated@reductions$umap@cell.embeddings, mouse_integrated@meta.data, mouse_integrated@assays$RNA@data["Klf4", ])
+colnames(df)[38] <- "Klf4"
+# Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+  family = "Helvetica",
+  size = 16,
+  color = 'black')
+
+## Klf4
+p1 <- plot_ly(data = df[df$condition == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, marker = list(size = 14, line = list(color = "black", width = 1)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+p2 <- plot_ly(data = df[df$condition == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Klf4, marker = list(size = 14, line = list(color = "black", width = 1)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+# Featureplots for Klf4 in human
+FeaturePlot(human_integrated, features = "KLF4", split.by = "newcondition", cols = c("navy", "olivedrab1"), pt.size = 1)
+
+FeaturePlot(human_integrated, features = "KLF4", split.by = "newcondition", cols = viridisLite::viridis(10), pt.size = 1)
+
+df <- cbind(human_integrated@reductions$umap@cell.embeddings, human_integrated@meta.data, human_integrated@assays$RNA@data["KLF4", ])
+colnames(df)[50] <- "KLF4"
+# Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+        family = "Helvetica",
+        size = 16,
+        color = 'black')
+
+## KLF4
+p3 <- plot_ly(data = df[df$newcondition == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ KLF4, colors = viridisLite::viridis(10), marker = list(size = 14, line = list(color = "black", width = 1)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+p4 <- plot_ly(data = df[df$newcondition == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ KLF4, colors = viridisLite::viridis(10), marker = list(size = 14, line = list(color = "black", width = 1)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+df <- cbind(mouse_integrated@reductions$umap@cell.embeddings, mouse_integrated@meta.data, mouse_integrated@assays$RNA@data["Vegfc", ])
+colnames(df)[38] <- "Vegfc"
+# Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+        family = "Helvetica",
+        size = 16,
+        color = 'black')
+
+## nCount_RNA
+p1 <- plot_ly(data = df[df$condition == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Vegfc, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+p2 <- plot_ly(data = df[df$condition == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Vegfc, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+# Featureplots for Klf4 in human
+FeaturePlot(human_integrated, features = "VEGFC", split.by = "newcondition", cols = c("navy", "olivedrab1"), pt.size = 1)
+
+FeaturePlot(human_integrated, features = "VEGFC", split.by = "newcondition", cols = viridisLite::viridis(10), pt.size = 1)
+
+df <- cbind(human_integrated@reductions$umap@cell.embeddings, human_integrated@meta.data, human_integrated@assays$RNA@data["VEGFC", ])
+colnames(df)[50] <- "VEGFC"
+# Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+        family = "Helvetica",
+        size = 16,
+        color = 'black')
+
+## VEGFC
+p3 <- plot_ly(data = df[df$newcondition == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ VEGFC, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+p4 <- plot_ly(data = df[df$newcondition == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ VEGFC, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
