@@ -197,12 +197,12 @@ p2 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "m
 #############################################
 ## group
 df$newgroup <- factor(df$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
-colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
-p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ newgroup, colors = colours, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+colours <- c ("#D81B60", "#1E88E5", "#004D40", "#FFC107")
+p3 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ newgroup, colors = colours, marker = list(size = 20, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
 
 ## cluster 
 ## attention: the colour is generated later
-p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = further.colour, marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+p5 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ seurat_clusters, colors = further.colour, marker = list(size = 20, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
 
 ## pie chart for cluster
 dfy <- df %>% group_by(seurat_clusters) %>% summarise(count = n()) %>% mutate (percentage = count/nrow(df)*100)
@@ -2620,20 +2620,40 @@ t <- list(
 p3 <- plot_ly(data = df[df$newcondition == "Injured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ VEGFC, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
 
 p4 <- plot_ly(data = df[df$newcondition == "Uninjured", ], x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ VEGFC, colors = viridisLite::plasma(10), marker = list(size = 12, line = list(color = "white", width = 0.2)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
-
-
-
-
-
-
-
-
-
 ```
 
+### Step 22 Version 5 plots
+```{r version5_plots}
+### 26 Aug 2021 plots
+DotPlot(combined, features = c("Vegfa", "Vegfb", "Vegfc", "Figf"), group.by = "paperID", idents = c("Mouse P6 Uninjured", "Mouse P10 Uninjured", "Mouse Adult Uninjured", "Mouse P2 MI21D", "Mouse Adult MI1D", "Mouse Adult MI3D", "Mouse Adult MI7D", "Mouse Adult MI14D", "Mouse Adult MI28D"), scale.min = 0, scale.max = 20, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+## upregulated genes
+### 1 day post MI: Lgals3, Tyrobp
+### 3 days post MI: Dnaja1, Klf2
+### 7 days post MI: Afdn, Tlnrd1
+### 14 days post MI: Gm10123, Mir682
+### 28 days post MI: Mfap5, Cryab
 
+DotPlot(combined, features = c("Lgals3", "Tyrobp", "Dnaja1", "Klf2", "Afdn", "Tlnrd1", "Gm10123", "Mir682", "Mfap5", "Cryab"), group.by = "paperID", idents = c("Mouse P6 Uninjured", "Mouse P10 Uninjured", "Mouse Adult Uninjured", "Mouse P2 MI21D", "Mouse Adult MI1D", "Mouse Adult MI3D", "Mouse Adult MI7D", "Mouse Adult MI14D", "Mouse Adult MI28D"), scale.min = 0, scale.max = 20, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+mouse_integrated$paperID <- factor(mouse_integrated$paperID, levels = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"))
+  
+DotPlot(mouse_integrated, features = c("Lgals3", "Tyrobp", "Dnaja1", "Klf2", "Afdn", "Tlnrd1", "Gm10123", "Mir682", "Mfap5", "Cryab"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 80, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+saveRDS(mouse_integrated, file = "mouse_integrated_26082021.rds")
 
+## downregulated genes
+### 1 day post MI: None
+### 3 days post MI: Irf1, Mprip
+### 7 days post MI: Tpt1, Rps12
+### 14 days post MI: Plpp3, Hspa1a
+### 28 days post MI: Actb, Col4a1
 
+DotPlot(mouse_integrated, features = c("Irf1", "Mprip", "Tpt1", "Rps12", "Plpp3", "Hspa1a", "Actb", "Col4a1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# shared top5 genes
+## upregulated
+DotPlot(mouse_integrated, features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+## downregulated
+DotPlot(mouse_integrated, features = c("Fabp4", "Ly6c1", "Cd36", "Ly6a", "Gpihbp1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
