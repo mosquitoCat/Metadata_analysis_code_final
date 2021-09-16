@@ -1971,7 +1971,7 @@ DotPlot(human_integrated, features = c(new_list, "FOXN3", "NPTN"), group.by = "n
 ```
 </div>
 
-### Step 21: Change the colour of Dimplot 22072021
+### Step 21: Change the colour of Dimplot 22072021 and 16/09/2021
 
 <div class = "teal">
 ```{r redimplot, message = FALSE, warning = FALSE}
@@ -1987,6 +1987,7 @@ t <- list(
   size = 16,
   color = 'black')
 
+library(RColorBrewer)
 # coloured by paperID
 p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ paperID, colors = colorRampPalette(brewer.pal(9,"Set1"))(9), marker = list(size = 12, line = list(color = "black", width = 1)), width = 1000, height = 1000) %>% layout(title = "", yaxis = list(zeroline = FALSE), xaxis = list(zeroline = FALSE), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
 
