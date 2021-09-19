@@ -272,14 +272,14 @@ summary <- as.data.frame(summary)
 # number of cells in each group
 group_number <- as.data.frame(meta_to_use %>% group_by(newgroup) %>% tally())
 # calculate the percentage of cells in each cluster
-summary <- summary %>% mutate (percentage = case_when(newgroup == "cHF Adult" ~ n/group_number[1, 2]*100, newgroup == "dHF Adult" ~ n/group_number[2, 2]*100, newgroup == "Normal Adult" ~ n/group_number[3, 2]*100, newgroup == "Normal Fetal" ~ n/group_number[4, 2]*100))
+summary <- summary %>% mutate (percentage = case_when(newgroup == "cHF adult" ~ n/group_number[1, 2]*100, newgroup == "dHF adult" ~ n/group_number[2, 2]*100, newgroup == "Uninjured adult" ~ n/group_number[3, 2]*100, newgroup == "Uninjured fetal" ~ n/group_number[4, 2]*100))
 # normalise percentage data
 summary1 <- as.data.frame(summary %>% group_by(seurat_clusters) %>% summarise(norm_total = sum(percentage)))
 summary <- summary %>% mutate (percentage_norm = case_when(seurat_clusters == "0" ~ percentage/summary1[1, 2]*100, seurat_clusters == "1" ~ percentage/summary1[2, 2]*100, seurat_clusters == "2" ~ percentage/summary1[3, 2]*100, seurat_clusters == "3" ~ percentage/summary1[4, 2]*100, seurat_clusters == "4" ~ percentage/summary1[5, 2]*100, seurat_clusters == "5" ~ percentage/summary1[6, 2]*100, seurat_clusters == "6" ~ percentage/summary1[7, 2]*100, seurat_clusters == "7" ~ percentage/summary1[8, 2]*100, seurat_clusters == "8" ~ percentage/summary1[9, 2]*100))
 write.csv(summary, file = "gene_cluster_composition.csv")
 # normalised percentage graph
-colours <- c ("#bfbfff", "#0000ff", "red", "darkred")
-summary$newgroup <- factor(summary$newgroup, levels = c("Normal Fetal", "Normal Adult", "cHF Adult", "dHF Adult"))
+colours <- c ("#D81B60", "#1E88E5", "#004D40", "#FFC107")
+summary$newgroup <- factor(summary$newgroup, levels = c("Uninjured fetal", "Uninjured adult", "cHF adult", "dHF adult"))
 p <- ggplot(data = summary, aes(x = seurat_clusters, y = percentage_norm)) + geom_bar(stat = "identity", aes(fill = newgroup)) + scale_fill_manual(values = colours) + theme_classic() + labs(x = "Cluster", y = "Ordered Normalised Percentage (%)") + theme(legend.position = c(0.85, 0.8), legend.key.size = unit(1.5,"line"), legend.text = element_text(size = 24), legend.title = element_text(size = 24), axis.line = element_line(colour = "black", size = 1.25, linetype = "solid"), axis.text.x = element_text(size = 24, colour = "black"), axis.text.y = element_text(size = 24, colour = "black"), axis.title.x = element_text(size = 24), axis.title.y = element_text(size = 24), axis.ticks.length = unit(0.4,"cm")) + NoLegend()
 ggplotly(p, width = 800, height = 800)
 ```
@@ -2656,4 +2656,86 @@ DotPlot(mouse_integrated, features = c("Irf1", "Mprip", "Tpt1", "Rps12", "Plpp3"
 DotPlot(mouse_integrated, features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ## downregulated
 DotPlot(mouse_integrated, features = c("Fabp4", "Ly6c1", "Cd36", "Ly6a", "Gpihbp1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16), axis.text = element_text(family = "Helvetica", size = 16), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+### Step 23 Version 6 plots
+
+```{r version6}
+Idents(integrated) <- "newgroup"
+
+# Mairi: I think make a new Figure 6 E to show the top 5 or so genes that are common to both HF groups- make a plot of those perhaps?
+## MSRB3, MTATP8P1, SMARCA4, NBL1, PTMAP5
+DotPlot(integrated, features = c("MSRB3", "MTATP8P1", "SMARCA4", "NBL1", "PTMAP5"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+# Mairi: Should you show the top 5 in a plot, similar to what you are now doing for the new 6E? i.e. the new 6G?
+## LTBP4, CCDC80, SOX4, EEF2, PTMA
+DotPlot(integrated, features = c("LTBP4", "CCDC80", "SOX4", "EEF2", "PTMA"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+# Mairi: Add Gas6 and Tsc22d3 to the new 7B (existing 7A).
+DotPlot(combined, features = c("Klf4", "Gas6", "Tsc22d3"), group.by = "paperID", idents = c("Mouse Adult Uninjured", "Mouse Adult MI1D", "Mouse Adult MI3D", "Mouse Adult MI7D", "Mouse Adult MI14D", "Mouse Adult MI28D", "Human Adult dHF", "Human Adult cHF", "Human Adult Uninjured", "Human Fetal Uninjured"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+# Mairi: Tempted to delete the downregulated genes and then show the top 4 upregulated genes for each timepoint?
+Idents(mouse_integrated) <- "paperID"
+DotPlot(mouse_integrated, features = c("Lgals3", "Tyrobp", "Fcer1g", "Wfdc17", "Dnaja1", "Klf2", "Cd151", "Hspa1a", "Afdn", "Tlnrd1", "Plaat3", "Fscn1", "Gm10123", "Gm10275", "Gm10288", "Gm6472", "Mfap5", "Cryab", "Cxcl1", "Pi16"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+DotPlot(mouse_integrated, features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof", "Selenok", "Selenom", "Selenop", "Selenow", "Sem1", "Atp6v0c", "Vps28", "Nme2", "Lgals1", "Socs3", "Tmem176b", "Emp1", "Capg", "Ndfip1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic")) 
+```
+
+### Step 24 Version 7 plots
+```{r v7, warning = FALSE, message = FALSE}
+## DotPlot for Vegfc receptors
+DotPlot(mouse_integrated, features = c("Flt4"), group.by = "paperID", idents = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 40, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+DotPlot(mouse_integrated, features = c("Nrp2"), group.by = "paperID", idents = c("Uninjured P6", "Uninjured P10", "P2 21 days post MI", "Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 70, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+## FeaturePlot showing the EC identities
+x <- "Pecam1"
+df <- cbind(mouse_integrated@reductions$umap@cell.embeddings, mouse_integrated@meta.data, mouse_integrated@assays$RNA@data[x, ])
+colnames(df)[38] <- x
+### Plotly is used to generate beautiful feature plot here.
+
+t <- list(
+  family = "Helvetica",
+  size = 16,
+  color = 'black')
+
+#### Pecam1
+p1 <- plot_ly(data = df, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Pecam1, marker = list(size = 14, line = list(color = "black", width = 1)), showlegend = FALSE, width = 800, height = 800) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+### human data plots
+DotPlot(integrated, features = c("NOTCH3", "GAS5", "MALAT1"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+DotPlot(integrated, features = c("KLF1", "KLF2", "KLF3", "KLF4", "KLF5", "KLF6", "KLF7","KLF8","KLF9","KLF10","KLF11","KLF12","KLF13","KLF14","KLF15","KLF16","KLF17"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+DotPlot(combined, features = c("Klf1", "Klf2", "Klf3", "Klf4", "Klf5", "Klf6", "Klf7", "Klf8", "Klf9", "Klf10", "Klf11", "Klf12", "Klf13", "Klf14", "Klf15", "Klf16", "Klf17"), idents = c("Human Adult dHF", "Human Adult cHF", "Human Adult Uninjured", "Human Fetal Uninjured"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+```
+
+### Step 25 Version 8 plots
+```{r version8}
+markers <- c("Pecam1", "Cd34", "Itgb1", "Eng", "Cd93", "Emcn", "Esam", "Ptprc")
+FeaturePlot(mouse_integrated, features = c("Pecam1", "Cd34", "Itgb1", "Eng", "Cd93", "Emcn", "Esam", "Ptprc"), cols = c("gray", "Navy"), ncol = 4)
+
+gene_expression <- as.data.frame(t(mouse_integrated@assays$RNA@data[markers, ]))
+cell_metadata <- mouse_integrated@meta.data
+cell_embedding <- mouse_integrated@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+
+# Mouse Uninjured
+p1 <- plot_ly(data = new_dataframe, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ Pecam1, colors = viridisLite::magma(20), marker = list(size = 8, line = list(color = "white", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+## Mouse dotplots for replacing the pseudogenes
+### "Lgals3", "Tyrobp", "Fcer1g", "Wfdc17", "Dnaja1", "Klf2", "Cd151", "Hspa1a", "Afdn", "Tlnrd1", "Plaat3", "Fscn1", "1500012F01Rik", "2700089E24Rik", "Rab1", "Ppap2b", "Mfap5", "Cryab", "Cxcl1", "Pi16"
+DotPlot(mouse_integrated, features = c("Lgals3", "Tyrobp", "Fcer1g", "Wfdc17", "Dnaja1", "Klf2", "Cd151", "Hspa1a", "Afdn", "Tlnrd1", "Plaat3", "Fscn1", "Mir682", "Sfrs18", "D4Wsu53e", "Gpr116", "Mfap5", "Cryab", "Cxcl1", "Pi16"), idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+## calculate fold change for the new genes
+FoldChange(mouse_integrated, ident.1 = "Adult 14 days post MI", ident.2 = "Uninjured adult", features = c("Mir682", "Sfrs18", "D4Wsu53e", "Rab1", "Ppap2b", "Col1a1", "Orc5", "Cyb5", "Ccdc55", "Tenc1"))
+
+## take cHF out of figure 5e
+DotPlot(integrated, features = c("LTBP4", "CCDC80", "SOX4", "EEF2", "PTMA"), group.by = "newgroup", idents = c("Uninjured fetal", "Uninjured adult", "dHF adult"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+FeaturePlot(integrated, features = c("RPL39", "RPL11", "PTMA", "RPS11", "FN1", "NAP1L1", "EFNB2", "RPL10AP6", "LTBP4", "CCDC80", "SOX4", "EEF2", "HSPA5", "FUS", "PABPC1", "RTF1", "TIMP2"))
+
+DotPlot(integrated, features = c("KLF1", "KLF2", "KLF3", "KLF4", "KLF5", "KLF6", "KLF7", "KLF8", "KLF9", "KLF10", "KLF11", "KLF12", "KLF13", "KLF14", "KLF15", "KLF16", "KLF17"), idents = c("Uninjured adult", "dHF adult", "cHF adult"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+
+DotPlot(combined, features = c("Klf1", "Klf2", "Klf3", "Klf4", "Klf5", "Klf6", "Klf7", "Klf8", "Klf9", "Klf10", "Klf11", "Klf12", "Klf13", "Klf14", "Klf15", "Klf16", "Klf17"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
 ```
