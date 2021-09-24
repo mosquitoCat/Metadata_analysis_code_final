@@ -2739,3 +2739,21 @@ DotPlot(integrated, features = c("KLF1", "KLF2", "KLF3", "KLF4", "KLF5", "KLF6",
 
 DotPlot(combined, features = c("Klf1", "Klf2", "Klf3", "Klf4", "Klf5", "Klf6", "Klf7", "Klf8", "Klf9", "Klf10", "Klf11", "Klf12", "Klf13", "Klf14", "Klf15", "Klf16", "Klf17"), group.by = "newgroup", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
 ```
+
+# Step 26 Version 8 plots
+```{r version9}
+# plot the same panel for human data as well
+markers <- c("PECAM1", "CD34", "ITGB1", "ENG", "CD93", "EMCN", "ESAM", "PTPRC")
+FeaturePlot(human_integrated, features = markers, cols = c("gray", "Navy"), ncol = 4)
+
+gene_expression <- as.data.frame(t(as.matrix(human_integrated@assays$RNA@data[markers, ])))
+cell_metadata <- human_integrated@meta.data
+cell_embedding <- human_integrated@reductions$umap@cell.embeddings
+new_dataframe <- cbind(gene_expression, cell_metadata, cell_embedding)
+
+# Mouse Uninjured
+p1 <- plot_ly(data = new_dataframe, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter", mode = "markers", color = ~ PECAM1, colors = viridisLite::magma(20), marker = list(size = 8, line = list(color = "white", width = 0.5)), width = 500, height = 500) %>% layout(title = "", yaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), xaxis = list(zeroline = FALSE, showgrid = FALSE, showticklabels = FALSE, title = ""), font = t, legend = list(x = 0.9, y = 0.1, font = list(size = 30))) %>% hide_colorbar() %>% hide_legend() %>% hide_guides()
+
+# redo the dotplot to make it longer
+DotPlot(mouse_integrated, features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof", "Selenok", "Selenom", "Selenop", "Selenow", "Sem1", "Atp6v0c", "Vps28", "Nme2", "Lgals1", "Socs3", "Tmem176b", "Emp1", "Capg", "Ndfip1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+```
