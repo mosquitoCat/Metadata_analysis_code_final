@@ -3,6 +3,8 @@ title: "Meta_normal_and_HF_human_fetal_and_adult_heart_analysis"
 author: "Cass Li"
 date: "15/09/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -2757,3 +2759,77 @@ p1 <- plot_ly(data = new_dataframe, x = ~ UMAP_1, y = ~ UMAP_2, type = "scatter"
 # redo the dotplot to make it longer
 DotPlot(mouse_integrated, features = c("Cebpd", "Elob", "Gas5", "Rack1", "Selenof", "Selenok", "Selenom", "Selenop", "Selenow", "Sem1", "Atp6v0c", "Vps28", "Nme2", "Lgals1", "Socs3", "Tmem176b", "Emp1", "Capg", "Ndfip1"), group.by = "paperID", idents = c("Uninjured adult", "Adult 1 day post MI", "Adult 3 days post MI", "Adult 7 days post MI", "Adult 14 days post MI", "Adult 28 days post MI"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text = element_text(family = "Helvetica", size = 16, color = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
 ```
+
+# Step 27 Version 9 plots
+``` {r CD74plots}
+DotPlot(combined, features = list1, group.by = "paperID", idents = c("Human adult dHF", "Human adult cHF", "Human adult uninjured", "Mouse adult 28 days post MI", "Mouse adult 14 days post MI", "Mouse adult 7 days post MI", "Mouse adult 3 days post MI", "Mouse adult 1 day post MI", "Mouse adult uninjured"), scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+```
+
+# Step 28 Addressing Mairi's comments 27 Jan 2022
+
+1. Check the COVID specific markers in our meta-analysis data
+1.1 COVID hearts specific: eight Tier1 DEGs (Table 4) specific to COVID are IFI6, APOD, GABARAPL1, KIF1C, TCAP, ID1, EEF1A2, and PPDPF. 
+
+1.2 COVID hearts and MI hearts common: six Tier1 DEGs common to both COVID and MI are C7, ACTB, GSN, IFITM2, IFITM3, C1R, and TMSB4X.
+
+1.3 COVID hearts and COVID lungs common: eight Tier1 DEGs shared by COVID hearts and lungs are: IF6, C7, ACTB, IFITM2, IFITM3, C1R, UBC, HBA2.
+
+``` {r comments Point1_27Jan2022}
+# set the working directory
+setwd("~/Documents/Work_2022/Project_Meta_analysis/New_human_meta_Module2")
+
+# load the data
+## human and mouse
+combined <- readRDS("~/Documents/Work_2022/Project_Meta_analysis/New_human_meta_Module2/combined 5.rds")
+## human only
+integrated_human <- readRDS("~/Documents/Work_2022/Project_Meta_analysis/New_human_meta_Module2/integrated.rds")
+## mouse only
+integrated_mouse <- readRDS("~/Documents/Work_2022/Project_Meta_analysis/New_human_meta_Module2/mouse_integrated_26082021.rds")
+## check Idents and change if needed
+unique(Idents(combined))
+unique(Idents(integrated_human))
+unique(Idents(integrated_mouse))
+Idents(combined) <- "paperID"
+
+# marker list preparation
+# human and mouse combined datasets used mouse gene format
+list1 <- c("IFI6", "APOD", "GABARAPL1", "KIF1C", "TCAP", "ID1", "EEF1A2", "PPDPF")
+list2 <- c("C7", "ACTB", "GSN", "IFITM2", "IFITM3", "C1R", "TMSB4X")
+list3 <- c("IF6", "C7", "ACTB", "IFITM2", "IFITM3", "C1R", "UBC", "HBA2")
+list1_mouse <- human2mouse(list1)$mouseGene
+list2_mouse <- human2mouse(list2)$mouseGene # TMSB4X doesn't have a mouse orthologue
+list3_mouse <- human2mouse(list3)$mouseGene
+# human C1R has two orthologues in mouse Cira and C1rb. human HBA gene have two orthologues Hba-a1 and Hba-a2.
+
+# plot list 1 in combined data, which is mouse format
+png("COVID_heart_specific_marker_in_metaanalysis.png", width = 3000, height = 2000, res = 300)
+DotPlot(combined, features = list1_mouse, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+dev.off()
+
+# plot list 2 in combined data, which is mouse format
+png("COVID_heart_and_MI_heart_common_marker_in_metaanalysis.png", width = 3000, height = 2000, res = 300)
+DotPlot(combined, features = list2_mouse, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+dev.off()
+
+# plot list 3 in combined data, which is mouse format
+png("COVID_heart_and_COVID_lung_common_marker_in_metaanalysis.png", width = 3000, height = 2000, res = 300)
+DotPlot(combined, features = list3_mouse, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+dev.off()
+```
+
+# Step 29 Check targets for Kate 11 Feb 2022
+
+Kate has identified several targets from her zebrafish single cell data set analysis, which included 4 groups: uninjured, 2 dpi, 7 dpi, and 14 dpi. After the discussion, four markers, including Igfbp7, Serpine1, Nppc, and Ifitm1, were identified to be up-regulated at 2 dpi and 7 dpi where the vascular regeneration is more prominent. To check the translational relevance, I carried out check of these markers in the meta-analysis data set.
+``` {r comments Point1_27Jan2022}
+# set the working directory
+setwd("~/Documents/Meta_analysis_paper_v12")
+# load the data
+combined <- readRDS("~/Documents/Meta_analysis_paper_v12/combined.rds")
+# generate the list
+list <- c("Igfbp7", "Serpine1", "Nppc", "Ifitm1")
+# set the grouping factor
+Idents(combined) <- "paperID"
+# generate dotplots
+DotPlot(combined, features = list, group.by = "paperID", scale.min = 0, scale.max = 100, col.min = -5, col.max = 5, cols = c("navy", "orange")) + theme_bw() + theme(text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text = element_text(family = "Helvetica", size = 16, colour = "black"), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
+```
+
